@@ -1,10 +1,12 @@
 /**
- * 中文分词 — 有网络时优先 jieba（/api/segment），离线回退词典分词
+ * 中文分词 — 有网络优先 jieba；离线加载 data/keywords.txt + 用户自定义词
  */
 const Segmenter = (() => {
-  const MAX_WORD_LEN = 8;
+  const MAX_WORD_LEN = 12;
   const API_TIMEOUT_MS = 15000;
   const HEALTH_TIMEOUT_MS = 6000;
+  const USER_DICT_KEY = "ciyun-user-keywords";
+  const KEYWORDS_URL = "data/keywords.txt";
 
   const STOPWORDS = new Set([
     "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
@@ -15,46 +17,93 @@ const Segmenter = (() => {
     "然后", "因为", "所以", "但是", "如果", "我们", "他们", "你们",
     "让", "将", "被", "把", "对", "从", "向", "以", "为", "所", "还",
     "才", "能", "或", "而", "且", "并", "于", "其", "之", "地",
-    "得", "过", "来", "去", "给", "用", "由", "把", "被", "让",
-    "作为", "已经", "多个", "不同", "整个", "不仅", "而是", "例如",
+    "得", "过", "来", "去", "给", "用", "由",
+    "作为", "已经", "多个", "不同", "整个", "不仅", "而是", "例如", "之一",
+    "正在", "为了", "虽然", "然而", "因此", "其", "并", "被", "将",
+    "之一", "之二", "之三", "其中", "各种", "某个", "某些", "每个",
   ]);
 
-  const DICT_LIST = [
-    "Python", "python", "人工智能", "自然语言处理", "数据挖掘", "语音识别", "文本处理",
-    "系统设计", "项目开发", "模型训练", "数据清洗", "云计算", "数据科学", "课堂教学",
-    "动态词云", "交互展示", "词频统计", "中文分词", "创新实践", "程序设计", "可视化",
-    "数据分析", "机器学习", "深度学习", "词云", "词云可视化", "自动化办公", "Web开发",
-    "数字经济", "条件判断", "循环结构", "函数设计", "文件操作", "动态可视化", "数据思维",
-    "创新思维", "舆情监测", "课堂互动", "智慧教学", "数据决策", "文本分析", "大数据",
-    "声音数据", "工程实践", "智能分析", "数据处理", "编程能力", "界面交互", "综合素养",
-    "pyecharts", "ECharts", "jieba", "Counter", "自然语言", "工程能力", "开发效率",
-    "面向对象", "数据结构", "基础语法", "图形边界", "形状轮廓", "颜色搭配", "词语大小",
-    "热点关键词", "市场反馈", "用户评价", "讨论热点", "新媒体运营",
-    "企业管理", "程序开发", "应用技术", "程序设计能力", "数据分析能力", "界面交互能力",
-    "创新实践能力", "人工智能应用", "人工智能系统", "人工智能领域", "人工智能相关",
-    "人工智能应用能力", "程序设计", "课程", "学生", "教学", "实践", "项目", "函数",
-    "变量", "循环", "条件", "模块", "算法", "网络", "自动化", "脚本", "测试", "调试",
-    "语法", "框架", "接口", "数据库", "文本", "处理", "统计", "模型", "模式", "自动",
-    "交互", "展示", "输入", "输出", "文件", "系统", "计算机", "科学", "技术", "应用",
-    "基础", "高级", "方法", "工具", "平台", "环境", "运行", "执行", "对象", "继承",
-    "多态", "封装", "异常", "计算", "数值", "图形", "图像", "图表", "组件", "服务",
-    "云端", "本地", "在线", "语言", "代码", "编程", "开发", "学习", "设计", "能力",
-    "工程", "问题", "程序", "效率", "逻辑", "实现",
-  ].sort((a, b) => b.length - a.length);
-
-  let zhSegmenter = null;
-  if (typeof Intl !== "undefined" && Intl.Segmenter) {
-    try {
-      zhSegmenter = new Intl.Segmenter("zh-CN", { granularity: "word" });
-    } catch (_) {
-      zhSegmenter = null;
-    }
-  }
+  /** @type {string[]} */
+  let dictList = [];
+  let dictReady = false;
+  let initPromise = null;
 
   /** @type {boolean | null} */
   let jiebaAvailable = null;
   let lastEngine = "local";
   let activeSegmentUrl = "";
+
+  function rebuildDictList(extra = []) {
+    const seen = new Set();
+    const merged = [];
+    for (const w of [...extra, ...loadUserDict(), ...dictList]) {
+      const term = String(w).trim();
+      if (term.length < 2 || seen.has(term)) continue;
+      seen.add(term);
+      merged.push(term);
+    }
+    dictList = merged.sort((a, b) => b.length - a.length);
+  }
+
+  function loadUserDict() {
+    try {
+      const raw = localStorage.getItem(USER_DICT_KEY);
+      if (!raw) return [];
+      return raw.split(/[\n,，;；]+/).map((s) => s.trim()).filter((s) => s.length >= 2);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveUserDict(lines) {
+    const text = lines.filter((s) => s.trim().length >= 2).join("\n");
+    localStorage.setItem(USER_DICT_KEY, text);
+    rebuildDictList();
+  }
+
+  function getUserDictText() {
+    return loadUserDict().join("\n");
+  }
+
+  async function loadKeywordsFile() {
+    const bases = [
+      KEYWORDS_URL,
+      "../data/keywords.txt",
+      "/data/keywords.txt",
+    ];
+    for (const url of bases) {
+      try {
+        const res = await fetch(url, { cache: "no-cache" });
+        if (!res.ok) continue;
+        const text = await res.text();
+        const words = text.split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line && !line.startsWith("#"))
+          .map((line) => line.split(/\s+/)[0])
+          .filter((w) => w.length >= 2);
+        if (words.length > 0) {
+          dictList = words;
+          return words.length;
+        }
+      } catch (_) {
+        /* try next path */
+      }
+    }
+    return 0;
+  }
+
+  async function init() {
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      await loadKeywordsFile();
+      rebuildDictList();
+      dictReady = true;
+      if (isNetworkAvailable()) {
+        await probeJiebaApi(true);
+      }
+    })();
+    return initPromise;
+  }
 
   function isNetworkAvailable() {
     return typeof navigator === "undefined" ? true : navigator.onLine;
@@ -68,12 +117,9 @@ const Segmenter = (() => {
     const urls = [];
     const cfg = normalizeSegmentUrl(window.CIYUN_CONFIG?.segmentApi);
     if (cfg) urls.push(cfg);
-
     const same = normalizeSegmentUrl(`${window.location.origin}/api/segment`);
     if (!urls.includes(same)) urls.push(same);
-
     if (!urls.includes("/api/segment")) urls.push("/api/segment");
-
     return [...new Set(urls)];
   }
 
@@ -121,9 +167,8 @@ const Segmenter = (() => {
       }
       if (/[\u4e00-\u9fff]/.test(s[i])) {
         let matched = false;
-        for (const term of DICT_LIST) {
-          if (!/^[\u4e00-\u9fff]+$/.test(term)) continue;
-          if (s.startsWith(term, i)) {
+        for (const term of dictList) {
+          if (/^[\u4e00-\u9fff]+$/.test(term) && s.startsWith(term, i)) {
             words.push(term);
             i += term.length;
             matched = true;
@@ -132,7 +177,8 @@ const Segmenter = (() => {
         }
         if (matched) continue;
         if (i + 2 <= s.length) {
-          words.push(s.slice(i, i + 2));
+          const two = s.slice(i, i + 2);
+          if (!STOPWORDS.has(two)) words.push(two);
           i += 2;
         } else {
           i += 1;
@@ -144,62 +190,18 @@ const Segmenter = (() => {
     return words.filter(isValidWord);
   }
 
-  function segmentByIntl(text) {
-    if (!zhSegmenter) return [];
-    const words = [];
-    for (const { segment, isWordLike } of zhSegmenter.segment(text)) {
-      const word = segment.trim();
-      if (!word) continue;
-      if (word.length > MAX_WORD_LEN && /[\u4e00-\u9fff]/.test(word)) {
-        words.push(...dictSegment(word));
-        continue;
-      }
-      if (isWordLike || /^[a-zA-Z]{2,}$/.test(word)) {
-        if (isValidWord(word)) words.push(word);
-      } else if (/[\u4e00-\u9fff]{2,}/.test(word)) {
-        words.push(...dictSegment(word));
-      }
-    }
-    return words;
-  }
-
-  function segmentChunk(chunk) {
-    if (!chunk) return [];
-    const trimmed = chunk.trim();
-    if (!trimmed) return [];
-
-    if (/^[a-zA-Z\s]+$/.test(trimmed)) {
-      return trimmed.split(/\s+/).filter(isValidWord);
-    }
-
-    if (/[\u4e00-\u9fff]/.test(trimmed)) {
-      const dictWords = dictSegment(trimmed);
-      if (dictWords.length > 0) return dictWords;
-    }
-
-    const intlWords = segmentByIntl(trimmed);
-    if (intlWords.length > 0) return intlWords;
-
-    if (trimmed.length > MAX_WORD_LEN) return dictSegment(trimmed);
-
-    return isValidWord(trimmed) ? [trimmed] : [];
-  }
-
-  function extractWords(text) {
+  /** 按中英文连续块切分，避免标点打断整词 */
+  function extractWordsLocal(text) {
     if (!text || !text.trim()) return [];
-
-    const normalized = text.trim();
     const results = [];
-    const chunks = normalized.split(/[\s,，。！？；：、""''""''（）()\[\]【】《》<>·…—\-/\\|]+/);
-
-    for (const chunk of chunks) {
-      results.push(...segmentChunk(chunk));
+    const runs = text.match(/[a-zA-Z]+|[\u4e00-\u9fff]+/g) || [];
+    for (const run of runs) {
+      if (/^[a-zA-Z]+$/i.test(run)) {
+        if (isValidWord(run)) results.push(run);
+      } else {
+        results.push(...dictSegment(run));
+      }
     }
-
-    if (results.length === 0 && chunks.length === 1) {
-      results.push(...segmentChunk(normalized));
-    }
-
     return results;
   }
 
@@ -210,7 +212,6 @@ const Segmenter = (() => {
       activeSegmentUrl = "";
       return false;
     }
-
     for (const url of getSegmentApiUrls()) {
       try {
         const res = await fetchWithTimeout(healthUrl(url), { method: "GET" }, HEALTH_TIMEOUT_MS);
@@ -221,11 +222,8 @@ const Segmenter = (() => {
           activeSegmentUrl = url;
           return true;
         }
-      } catch (_) {
-        /* try next endpoint */
-      }
+      } catch (_) { /* next */ }
     }
-
     jiebaAvailable = false;
     activeSegmentUrl = "";
     return false;
@@ -233,10 +231,7 @@ const Segmenter = (() => {
 
   async function segmentWithJieba(text) {
     if (!isNetworkAvailable()) return null;
-
-    if (jiebaAvailable === null) {
-      await probeJiebaApi(true);
-    }
+    if (jiebaAvailable === null) await probeJiebaApi(true);
     if (!jiebaAvailable) return null;
 
     const urls = activeSegmentUrl
@@ -263,11 +258,8 @@ const Segmenter = (() => {
         jiebaAvailable = true;
         activeSegmentUrl = url;
         return words;
-      } catch (_) {
-        /* try next endpoint */
-      }
+      } catch (_) { /* next */ }
     }
-
     jiebaAvailable = false;
     activeSegmentUrl = "";
     return null;
@@ -275,14 +267,19 @@ const Segmenter = (() => {
 
   async function extractWordsAsync(text) {
     if (!text || !text.trim()) return [];
+    await init();
 
     if (isNetworkAvailable()) {
       const jiebaWords = await segmentWithJieba(text);
       if (jiebaWords && jiebaWords.length > 0) return jiebaWords;
     }
 
-    lastEngine = "local";
-    return extractWords(text);
+    lastEngine = dictReady ? "dict" : "local";
+    return extractWordsLocal(text);
+  }
+
+  function extractWords(text) {
+    return extractWordsLocal(text);
   }
 
   function getLastEngine() {
@@ -297,15 +294,17 @@ const Segmenter = (() => {
     return activeSegmentUrl;
   }
 
+  function getDictSize() {
+    return dictList.length;
+  }
+
   function resplitLongEntries(entries) {
     const map = new Map();
     for (const [key, count] of entries) {
       if (key.length > MAX_WORD_LEN && /[\u4e00-\u9fff]/.test(key)) {
-        const parts = extractWords(key);
+        const parts = extractWordsLocal(key);
         if (parts.length > 0) {
-          for (const p of parts) {
-            map.set(p, (map.get(p) || 0) + count);
-          }
+          for (const p of parts) map.set(p, (map.get(p) || 0) + count);
           continue;
         }
       }
@@ -322,20 +321,23 @@ const Segmenter = (() => {
     window.addEventListener("offline", () => {
       jiebaAvailable = false;
       activeSegmentUrl = "";
-      lastEngine = "local";
+      lastEngine = "dict";
     });
   }
 
   return {
+    init,
     extractWords,
     extractWordsAsync,
     probeJiebaApi,
     getLastEngine,
     isJiebaAvailable,
     getActiveSegmentUrl,
+    getDictSize,
+    getUserDictText,
+    saveUserDict,
     resplitLongEntries,
     STOPWORDS,
-    DICT_LIST,
     MAX_WORD_LEN,
   };
 })();

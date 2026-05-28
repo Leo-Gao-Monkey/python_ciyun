@@ -959,6 +959,17 @@ body.console-layout {
   min-width: 0;
 }
 
+.manual-actions .btn-secondary {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.user-dict-input {
+  min-height: 72px;
+  max-height: 160px;
+  margin-bottom: 8px;
+}
+
 .input-row input {
   flex: 1;
   min-width: 0;

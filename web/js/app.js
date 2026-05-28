@@ -64,7 +64,11 @@
     buildShapeStrip();
     applyBackground();
     updateShapeOutlineGuide();
-    await Segmenter.probeJiebaApi();
+    await Segmenter.init();
+    const userDictEl = document.getElementById("user-dict-input");
+    if (userDictEl && !userDictEl.value) {
+      userDictEl.value = Segmenter.getUserDictText();
+    }
     updateSegmentBadge();
     await initManualInput();
     bindEvents();
@@ -112,14 +116,15 @@
       segmentEngineEl.textContent = "分词: jieba";
       segmentEngineEl.className = "segment-badge segment-jieba";
       const url = Segmenter.getActiveSegmentUrl();
-      segmentEngineEl.title = url
-        ? `在线 jieba 分词\n${url}`
-        : "在线 jieba 分词";
+      segmentEngineEl.title = url ? `在线 jieba 分词\n${url}` : "在线 jieba 分词";
       return;
     }
-    segmentEngineEl.textContent = "分词: 本地词典";
+    const n = Segmenter.getDictSize?.() || 0;
+    segmentEngineEl.textContent = n > 0 ? `分词: 词典(${n})` : "分词: 本地";
     segmentEngineEl.className = "segment-badge segment-local";
-    segmentEngineEl.title = "未连接 jieba 服务（请运行 python web/serve.py 并安装 jieba）";
+    segmentEngineEl.title = n > 0
+      ? `已加载 ${n} 个领域词；运行 python web/serve.py 可启用 jieba\n可在「自定义词条」补充误拆词`
+      : "未连接 jieba，请运行 python web/serve.py 或添加自定义词条";
   }
 
   function setSyncStatus(ok) {
@@ -211,6 +216,33 @@
     showToast(`已切换为${label}词云`);
   }
 
+  async function resegmentManual() {
+    const text = wordInput?.value.trim();
+    if (!text) {
+      showToast("请先在文本框中输入内容");
+      return;
+    }
+    WordStore.setDisplaySource("manual");
+    updateSourceTabs();
+    WordStore.clearDisplay();
+    const result = await ingestText(text, "manual");
+    const engine = Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典";
+    if (result.added > 0) {
+      showToast(`已重新分词（${engine}），共 ${result.added} 个词`);
+    } else {
+      showToast("重新分词未得到有效词汇");
+    }
+  }
+
+  function saveUserDictFromPanel() {
+    const el = document.getElementById("user-dict-input");
+    if (!el) return;
+    const lines = el.value.split(/[\n,，;；]+/).map((s) => s.trim()).filter(Boolean);
+    Segmenter.saveUserDict(lines);
+    updateSegmentBadge();
+    showToast(`已保存 ${lines.length} 个自定义词条`);
+  }
+
   async function initManualInput() {
     if (!wordInput || typeof DemoSample === "undefined") return;
     const text = DemoSample.getManualIntroText();
@@ -278,6 +310,8 @@
 
     btnAdd.addEventListener("click", submitManualInput);
     btnLoadDemo?.addEventListener("click", loadDemoSample);
+    document.getElementById("btn-resegment")?.addEventListener("click", resegmentManual);
+    document.getElementById("btn-save-user-dict")?.addEventListener("click", saveUserDictFromPanel);
     wordInput?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();

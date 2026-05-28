@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#eef2f9">
   <meta name="description" content="基于 Python 的词云可视化 — 支持语音输入、手动录入与实时词云展示">
   <title>基于Python的词云可视化</title>
-  <link rel="stylesheet" href="css/kiosk.css?v=20260616">
+  <link rel="stylesheet" href="css/kiosk.css?v=20260617">
 </head>
 <body class="console-layout">
   <div id="background-layer"></div>
@@ -105,9 +105,10 @@
         <textarea id="word-input" class="manual-input speech-editor" rows="10" placeholder="输入或粘贴文本，提交后生成词云" spellcheck="false"></textarea>
         <div class="input-row manual-actions">
           <button id="btn-add" class="btn-add" type="button">提交到词云</button>
+          <button id="btn-resegment" class="btn-secondary" type="button">重新分词</button>
           <button id="btn-load-demo" class="btn-secondary btn-load-demo" type="button">载入短示例</button>
         </div>
-        <p class="field-hint">有网络时自动使用 jieba 分词 · 词云最多显示 50 个高频词 · Ctrl+Enter 提交</p>
+        <p class="field-hint">有网络且运行 serve.py 时用 jieba；否则用领域词典。误拆词请点「重新分词」或添加自定义词条 · Ctrl+Enter 提交</p>
       </section>
 
       <section class="panel-stats">
@@ -128,6 +129,11 @@
           </div>
           <label class="upload-zone upload-zone-sm" for="bg-upload"><span>上传页面背景图</span></label>
           <input id="bg-upload" type="file" accept="image/*" hidden>
+          <label class="field-label">自定义词条 <span class="label-tag">修正误拆词</span></label>
+          <textarea id="user-dict-input" class="speech-editor user-dict-input" rows="3" placeholder="每行一个词，如：&#10;人工智能&#10;自然语言处理"></textarea>
+          <div class="action-row">
+            <button id="btn-save-user-dict" class="btn-secondary" type="button">保存词条</button>
+          </div>
           <div class="action-row">
             <button id="btn-export" class="btn-secondary" type="button">导出 JSON</button>
             <button id="btn-reset" class="btn-danger" type="button">清空词云</button>
@@ -135,7 +141,7 @@
         </div>
       </details>
 
-      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260616 · 数据保存在本机浏览器</footer>
+      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260617 · 数据保存在本机浏览器</footer>
     </aside>
   </div>
 
@@ -145,17 +151,17 @@
     <p id="boot-error-msg"></p>
   </div>
 
-  <script src="js/vendor/echarts.min.js?v=20260616"></script>
-  <script src="js/vendor/echarts-wordcloud.min.js?v=20260616"></script>
-  <script src="js/config.js?v=20260616"></script>
-  <script src="js/filter.js?v=20260616"></script>
-  <script src="js/stopwords.js?v=20260616"></script>
-  <script src="js/segment.js?v=20260616"></script>
-  <script src="js/masks.js?v=20260616"></script>
-  <script src="js/sync.js?v=20260616"></script>
-  <script src="js/store.js?v=20260616"></script>
-  <script src="js/chart.js?v=20260616"></script>
-  <script src="js/demo-sample.js?v=20260616"></script>
-  <script src="js/app.js?v=20260616"></script>
+  <script src="js/vendor/echarts.min.js?v=20260617"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js?v=20260617"></script>
+  <script src="js/config.js?v=20260617"></script>
+  <script src="js/filter.js?v=20260617"></script>
+  <script src="js/stopwords.js?v=20260617"></script>
+  <script src="js/segment.js?v=20260617"></script>
+  <script src="js/masks.js?v=20260617"></script>
+  <script src="js/sync.js?v=20260617"></script>
+  <script src="js/store.js?v=20260617"></script>
+  <script src="js/chart.js?v=20260617"></script>
+  <script src="js/demo-sample.js?v=20260617"></script>
+  <script src="js/app.js?v=20260617"></script>
 </body>
 </html>

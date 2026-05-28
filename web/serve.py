@@ -22,28 +22,19 @@ try:
 except ImportError:
     HAS_SPEECH = False
 
-try:
-    import jieba
+WEB_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = WEB_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
-    HAS_JIEBA = True
+try:
+    from segment_lib import HAS_JIEBA, segment_list
 except ImportError:
     HAS_JIEBA = False
 
-WEB_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = WEB_DIR.parent
+    def segment_list(text: str, stopwords=None) -> list[str]:  # type: ignore
+        return []
+
 STATE_FILE = WEB_DIR / "data" / "sync-state.json"
-KEYWORDS_DICT = PROJECT_ROOT / "data" / "keywords.txt"
-
-SEGMENT_STOPWORDS = {
-    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
-    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有",
-    "看", "好", "自己", "这", "那", "他", "她", "它", "们", "与", "及", "等",
-    "可以", "能够", "通过", "进行", "以及", "其中", "这种", "这些", "那些",
-    "作为", "已经", "以及", "多个", "不同", "整个", "不仅", "而是", "例如",
-}
-
-if HAS_JIEBA and KEYWORDS_DICT.exists():
-    jieba.load_userdict(str(KEYWORDS_DICT))
 DEFAULT_PORTS = (8765, 8766, 8767, 8080, 3000)
 
 DEFAULT_STATE = {
@@ -222,17 +213,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._send_json({"words": [], "engine": "jieba"})
             return
 
-        words: list[str] = []
-        for word in jieba.cut(text):
-            word = word.strip()
-            if len(word) < 2:
-                continue
-            if word in SEGMENT_STOPWORDS:
-                continue
-            if re.fullmatch(r"[\W_]+", word):
-                continue
-            words.append(word)
-
+        words = segment_list(text)
         self._send_json({"words": words, "engine": "jieba"})
 
     def _handle_transcribe(self) -> None:

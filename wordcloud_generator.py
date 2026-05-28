@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-import jieba
+from segment_lib import segment_joined
 from wordcloud import WordCloud
 
 
@@ -47,19 +47,9 @@ def segment_text(text: str, stopwords: set[str] | None = None) -> str:
     使用 jieba 对中文文本分词，并过滤停用词与无效字符。
     返回以空格分隔的词串，供 WordCloud 使用。
     """
-    stopwords = stopwords or STOPWORDS
-    words = jieba.cut(text)
-    filtered = []
-    for word in words:
-        word = word.strip()
-        if len(word) < 2:
-            continue
-        if word in stopwords:
-            continue
-        if re.fullmatch(r"[\W_]+", word):
-            continue
-        filtered.append(word)
-    return " ".join(filtered)
+    from segment_lib import segment_joined
+
+    return segment_joined(text, stopwords or STOPWORDS)
 
 
 def generate_wordcloud(
