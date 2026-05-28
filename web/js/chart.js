@@ -1,25 +1,33 @@
 /**
- * ECharts 动态交互词云
+ * ECharts 词云 — maskImage 形状 + 按词量自适应字号填满轮廓
  */
 const WordCloudChart = (() => {
   const COLORS = [
-    "#5b6fd6", "#7c3aed", "#0891b2", "#059669",
-    "#d97706", "#dc2626", "#db2777", "#4f46e5",
-    "#0e7490", "#b45309", "#1d4ed8", "#334155",
+    "#2563eb", "#16a34a", "#dc2626", "#9333ea",
+    "#f97316", "#0891b2", "#db2777", "#65a30d",
   ];
+
+  const ROTATION_RANGE = [-20, 20];
+  const ROTATION_STEP = 15;
+  const MASK_REF_AREA = 500 * 350;
+  const COVERAGE_TARGET = 0.68;
 
   /** @type {echarts.ECharts | null} */
   let chart = null;
   let containerEl = null;
   let currentMaskImage = null;
   let currentShape = "circle";
-  let maskFillRatio = 1;
+  let maskFillRatio = 0.38;
 
   function init(container) {
     containerEl = container;
     container.style.background = "transparent";
     chart = echarts.init(container, null, { renderer: "canvas" });
     return chart;
+  }
+
+  function clamp(v, lo, hi) {
+    return Math.min(hi, Math.max(lo, v));
   }
 
   function loadMaskImage(dataUrl) {
@@ -44,11 +52,187 @@ const WordCloudChart = (() => {
   function fillRatioFromCanvas(canvas) {
     const ctx = canvas.getContext("2d");
     const { width, height, data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let bright = 0;
+    let shape = 0;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 127) bright++;
+      if (data[i + 3] > 127 && data[i] + data[i + 1] + data[i + 2] < 384) shape++;
     }
-    return bright / (width * height);
+    return shape / (width * height);
+  }
+
+  function getContainerScale() {
+    if (!containerEl) return 1;
+    const w = containerEl.clientWidth || 500;
+    const h = containerEl.clientHeight || 350;
+    return Math.sqrt((w * h) / MASK_REF_AREA);
+  }
+
+  /**
+   * 根据唯一词数、遮罩面积、词长估算字号，使词语尽量铺满形状内部
+   */
+  function computeAdaptiveLayout(list, forExport = false) {
+    const n = Math.max(list.length, 1);
+    const fill = maskFillRatio || 0.38;
+    const shapeArea = MASK_REF_AREA * fill;
+    const charSlots = list.reduce((sum, [word]) => sum + Math.max(word.length, 1), 0);
+    const avgLen = charSlots / n;
+
+    let maxFont = Math.sqrt(shapeArea / (n * avgLen * 0.44)) * 1.18;
+
+    if (n <= 4) maxFont *= 1.45;
+    else if (n <= 8) maxFont *= 1.32;
+    else if (n <= 14) maxFont *= 1.2;
+    else if (n <= 22) maxFont *= 1.1;
+    else if (n >= 50) maxFont *= 0.9;
+    else if (n >= 75) maxFont *= 0.82;
+
+    maxFont *= getContainerScale();
+    if (forExport) maxFont *= 1.06;
+
+    maxFont = clamp(Math.round(maxFont), 32, 112);
+
+    const minRatio = n <= 6 ? 0.48 : n <= 12 ? 0.42 : n <= 25 ? 0.36 : 0.3;
+    const minFont = clamp(Math.round(maxFont * minRatio), 14, maxFont - 4);
+
+    let gridSize = 4;
+    if (n >= 65) gridSize = 5;
+    else if (n >= 90) gridSize = 6;
+
+    return { gridSize, sizeRange: [minFont, maxFont], minRatio };
+  }
+
+  function boostLayout(layout, factor = 1.15) {
+    const [minF, maxF] = layout.sizeRange;
+    return {
+      ...layout,
+      sizeRange: [
+        clamp(Math.round(minF * factor), 14, 100),
+        clamp(Math.round(maxF * factor), minF + 8, 120),
+      ],
+    };
+  }
+
+  /** 词频映射到字号区间，低频词也保留足够大小以填充边缘 */
+  function prepareWordData(list, layout) {
+    const sorted = [...list].sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) return [];
+
+    const maxC = sorted[0][1];
+    const minC = sorted[sorted.length - 1][1];
+    const floor = layout.minRatio;
+    const [minS, maxS] = layout.sizeRange;
+
+    return sorted.map(([name, count]) => {
+      let t = maxC === minC ? 1 : (count - minC) / (maxC - minC);
+      t = floor + t * (1 - floor);
+      return {
+        name,
+        value: minS + t * (maxS - minS),
+        count,
+      };
+    });
+  }
+
+  function buildOption(data, layout, forExport = false) {
+    const useMask = !!currentMaskImage;
+    const wordData = prepareWordData(data, layout);
+
+    const series = {
+      type: "wordCloud",
+      maskImage: useMask ? currentMaskImage : undefined,
+      left: "center",
+      top: "center",
+      width: "100%",
+      height: "100%",
+      gridSize: layout.gridSize,
+      sizeRange: layout.sizeRange,
+      rotationRange: ROTATION_RANGE,
+      rotationStep: ROTATION_STEP,
+      shrinkToFit: true,
+      drawOutOfBound: false,
+      layoutAnimation: !forExport,
+      textStyle: {
+        fontFamily: "Microsoft YaHei, PingFang SC, sans-serif",
+        fontWeight: "bold",
+        color() {
+          return COLORS[Math.floor(Math.random() * COLORS.length)];
+        },
+      },
+      emphasis: {
+        focus: "self",
+        textStyle: { shadowBlur: 8, shadowColor: "#999" },
+      },
+      data: wordData,
+    };
+
+    return {
+      backgroundColor: "transparent",
+      animation: !forExport,
+      animationDuration: forExport ? 0 : 600,
+      animationDurationUpdate: forExport ? 0 : 1000,
+      tooltip: {
+        show: !forExport,
+        formatter: (p) => `${p.name}：${p.data?.count ?? p.value} 次`,
+      },
+      series: [series],
+    };
+  }
+
+  function measureWordCoverage(chartInst, maskImg) {
+    if (!chartInst || !maskImg) return 1;
+
+    const chartCanvas = captureFromChart(chartInst, 1);
+    if (!chartCanvas?.width) return 1;
+
+    const w = chartCanvas.width;
+    const h = chartCanvas.height;
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    const mctx = maskCanvas.getContext("2d");
+    mctx.drawImage(maskImg, 0, 0, w, h);
+    const maskPx = mctx.getImageData(0, 0, w, h).data;
+    const wordPx = chartCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+
+    let shapePixels = 0;
+    let covered = 0;
+    for (let p = 0; p < w * h; p++) {
+      const i = p * 4;
+      const inShape = maskPx[i + 3] > 127 && maskPx[i] + maskPx[i + 1] + maskPx[i + 2] < 384;
+      if (!inShape) continue;
+      shapePixels++;
+      if (wordPx[i + 3] > 35) covered++;
+    }
+    return shapePixels > 0 ? covered / shapePixels : 1;
+  }
+
+  function waitUntilReady(chartInst, timeoutMs = 6000) {
+    return new Promise((resolve) => {
+      if (!chartInst) {
+        resolve(false);
+        return;
+      }
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        chartInst.off("finished", done);
+        setTimeout(() => resolve(true), 400);
+      };
+      chartInst.on("finished", done);
+      setTimeout(done, timeoutMs);
+    });
+  }
+
+  async function renderWithLayout(list, layout, exportMode) {
+    chart.resize();
+    chart.clear();
+    chart.setOption(buildOption(list, layout, exportMode), {
+      notMerge: true,
+      lazyUpdate: false,
+    });
+    chart.resize();
+    await waitUntilReady(chart, exportMode ? 9000 : 6000);
+    chart.resize();
   }
 
   async function resolveMask(shape, customMaskUrl) {
@@ -79,84 +263,6 @@ const WordCloudChart = (() => {
     }
   }
 
-  function computeGridSize(shape, wordCount, forExport) {
-    if (!currentMaskImage) return forExport ? 8 : 10;
-
-    // 轮廓环带区域较窄，使用更小 gridSize 让词语沿边缘排布
-    let size = forExport ? 2 : 3;
-    if (maskFillRatio < 0.06) size = forExport ? 2 : 2;
-    else if (maskFillRatio < 0.12) size = forExport ? 2 : 3;
-
-    if (wordCount > 50) size += 1;
-    if (wordCount > 100) size += 1;
-    return Math.max(2, size);
-  }
-
-  function buildOption(data, shape, forExport = false) {
-    const wordCount = data.length;
-    const useMask = !!currentMaskImage;
-    const gridSize = computeGridSize(shape, wordCount, forExport);
-
-    const series = {
-      type: "wordCloud",
-      shape: "circle",
-      left: "center",
-      top: "center",
-      width: "92%",
-      height: "92%",
-      sizeRange: forExport ? [12, 52] : [10, 44],
-      rotationRange: [-90, 90],
-      rotationStep: 15,
-      gridSize,
-      drawOutOfBound: false,
-      layoutAnimation: !forExport,
-      textStyle: {
-        fontFamily: "Microsoft YaHei, PingFang SC, sans-serif",
-        fontWeight: "bold",
-        color() {
-          return COLORS[Math.floor(Math.random() * COLORS.length)];
-        },
-      },
-      emphasis: {
-        focus: "self",
-        textStyle: { shadowBlur: 12, shadowColor: "rgba(91,111,214,0.5)" },
-      },
-      data: data.map(([name, value]) => ({ name, value })),
-    };
-
-    if (useMask) {
-      series.maskImage = currentMaskImage;
-    }
-
-    return {
-      backgroundColor: "transparent",
-      animation: !forExport,
-      animationDuration: forExport ? 0 : 600,
-      animationDurationUpdate: forExport ? 0 : 1000,
-      tooltip: { show: !forExport, formatter: (p) => `${p.name}：${p.value} 次` },
-      series: [series],
-    };
-  }
-
-  function waitUntilReady(chartInst, timeoutMs = 4000) {
-    return new Promise((resolve) => {
-      if (!chartInst) {
-        resolve(false);
-        return;
-      }
-      let settled = false;
-      const settleDelay = timeoutMs > 4000 ? 400 : 200;
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        chartInst.off("finished", done);
-        setTimeout(() => resolve(true), settleDelay);
-      };
-      chartInst.on("finished", done);
-      setTimeout(done, timeoutMs);
-    });
-  }
-
   async function render(list, shape, customMaskUrl, exportMode = false) {
     if (!chart) return;
     await resolveMask(shape, customMaskUrl);
@@ -166,15 +272,15 @@ const WordCloudChart = (() => {
       return;
     }
 
-    chart.clear();
-    chart.setOption(buildOption(list, shape, exportMode), {
-      notMerge: true,
-      lazyUpdate: false,
-    });
+    let layout = computeAdaptiveLayout(list, exportMode);
+    await renderWithLayout(list, layout, exportMode);
 
-    if (exportMode) {
-      chart.resize();
-      await waitUntilReady(chart, 8000);
+    if (!exportMode && currentMaskImage && list.length <= 80) {
+      const coverage = measureWordCoverage(chart, currentMaskImage);
+      if (coverage < COVERAGE_TARGET && layout.sizeRange[1] < 115) {
+        layout = boostLayout(layout, coverage < 0.45 ? 1.28 : 1.16);
+        await renderWithLayout(list, layout, false);
+      }
     }
   }
 
@@ -202,7 +308,7 @@ const WordCloudChart = (() => {
 
     const pr = 2;
     const w = Math.max(Math.round(width), 400);
-    const h = Math.max(Math.round(height), 300);
+    const h = Math.max(Math.round(height), 500);
     const outW = w * pr;
     const outH = h * pr;
 
@@ -217,9 +323,10 @@ const WordCloudChart = (() => {
 
     try {
       await resolveMask(shape, customMaskUrl);
+      const layout = computeAdaptiveLayout(list, true);
       exportChart.resize({ width: w, height: h });
       exportChart.clear();
-      exportChart.setOption(buildOption(list, shape, true), { notMerge: true });
+      exportChart.setOption(buildOption(list, layout, true), { notMerge: true });
       await waitUntilReady(exportChart, 10000);
 
       const chartCanvas = captureFromChart(exportChart, pr);

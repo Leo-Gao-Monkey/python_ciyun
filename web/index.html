@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="console-page">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#eef2f9">
   <meta name="description" content="基于 Python 的词云可视化 — 支持语音输入、手动录入与实时词云展示">
   <title>基于Python的词云可视化</title>
-  <link rel="stylesheet" href="css/kiosk.css?v=20260529">
+  <link rel="stylesheet" href="css/kiosk.css?v=20260616">
 </head>
 <body class="console-layout">
   <div id="background-layer"></div>
@@ -32,6 +32,17 @@
 
     <!-- 词云展示区域（置于上方） -->
     <section id="wordcloud-stage" class="wordcloud-stage">
+      <div class="shape-customize">
+        <h2 class="shape-customize-title">词云形状选择</h2>
+        <div class="shape-customize-row">
+          <div class="shape-strip" id="shape-strip" role="toolbar" aria-label="词云形状选择"></div>
+          <label class="shape-upload-btn" for="mask-upload" title="上传剪影图片">
+            <span class="shape-upload-icon" aria-hidden="true">📁</span>
+            <span class="shape-upload-label">自定义形状</span>
+          </label>
+          <input id="mask-upload" type="file" accept="image/*" hidden>
+        </div>
+      </div>
       <div class="stage-header">
         <div class="stage-header-left">
           <span class="stage-title">实时词云</span>
@@ -46,14 +57,13 @@
           <span id="sync-indicator" class="sync-indicator" title="同步状态">● 在线</span>
         </div>
       </div>
-      <div class="stage-body">
-        <div class="stage-bg-decor" aria-hidden="true"></div>
-        <div class="stage-vignette" aria-hidden="true"></div>
+      <div class="stage-body stage-body-cloud">
+        <div id="shape-outline-guide" class="shape-outline-guide" aria-hidden="true"></div>
         <div id="wordcloud-chart" class="wordcloud-chart"></div>
         <div id="empty-hint" class="empty-hint stage-empty">
           <div class="hint-icon">☁️</div>
           <p>提交词汇后，词云将在此区域动态呈现</p>
-          <p class="sub">鼠标悬停词语可查看词频 · 支持平滑过渡动画</p>
+          <p class="sub">词语按所选形状轮廓排布 · 词频越高字号越大 · 悬停查看次数</p>
         </div>
       </div>
     </section>
@@ -61,49 +71,48 @@
     <aside id="control-panel" class="control-panel">
       <header class="panel-header">
         <h1>控制面板</h1>
-        <span id="speech-status" class="status-badge">就绪</span>
+        <div class="panel-header-badges">
+          <span id="segment-engine" class="segment-badge segment-pending" title="分词引擎">分词检测中</span>
+          <span id="speech-status" class="status-badge">就绪</span>
+        </div>
       </header>
 
       <section class="panel-card">
         <h2 class="card-title"><span class="card-icon">🎙</span> 语音输入</h2>
-        <button id="btn-speak" class="btn-speak" type="button">
-          <span class="mic-ring"></span>
-          <span class="mic-icon">🎤</span>
-          <span class="btn-label">按住说话</span>
-          <span class="btn-hint">或点击切换录音 · 松手结束</span>
-        </button>
+        <div class="rec-controls" id="rec-controls">
+          <div class="rec-toolbar" role="toolbar" aria-label="录音控制">
+            <button id="btn-rec-start" class="btn-rec btn-rec-start" type="button">开始录音</button>
+            <button id="btn-rec-pause" class="btn-rec btn-rec-pause" type="button" disabled>暂停录音</button>
+            <button id="btn-rec-end" class="btn-rec btn-rec-end" type="button" disabled>结束录音</button>
+          </div>
+          <label class="rec-upload-row" for="audio-upload" title="上传音频文件并识别为文字">
+            <span class="rec-upload-icon" aria-hidden="true">📤</span> 上传录音
+          </label>
+          <input id="audio-upload" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm" hidden>
+        </div>
         <p id="interim-text" class="interim-text"></p>
         <label class="field-label" for="speech-editor">识别结果 <span class="label-tag">可编辑</span></label>
         <textarea id="speech-editor" class="speech-editor" rows="3" placeholder="语音识别内容将显示在这里"></textarea>
-        <div class="btn-row">
-          <button id="btn-submit-speech" class="btn-primary" type="button">提交到词云</button>
-          <button id="btn-clear-speech" class="btn-ghost" type="button">清空</button>
+        <div class="speech-actions">
+          <button id="btn-submit-speech" class="btn-speech-action btn-speech-submit" type="button">提交到词云</button>
+          <button id="btn-clear-speech" class="btn-speech-action btn-speech-clear" type="button">清空</button>
         </div>
       </section>
 
       <section class="panel-card">
         <h2 class="card-title"><span class="card-icon">✏️</span> 手动输入</h2>
-        <div class="input-row">
-          <input id="word-input" type="text" placeholder="输入词语，回车添加" autocomplete="off">
-          <button id="btn-add" class="btn-add" type="button">添加</button>
+        <label class="field-label" for="word-input">文本内容 <span class="label-tag">可编辑</span></label>
+        <textarea id="word-input" class="manual-input speech-editor" rows="10" placeholder="输入或粘贴文本，提交后生成词云" spellcheck="false"></textarea>
+        <div class="input-row manual-actions">
+          <button id="btn-add" class="btn-add" type="button">提交到词云</button>
+          <button id="btn-load-demo" class="btn-secondary btn-load-demo" type="button">载入短示例</button>
         </div>
-        <p class="field-hint">多个词用空格分隔 · 已启用敏感词与停用词过滤</p>
-      </section>
-
-      <section class="panel-card">
-        <h2 class="card-title"><span class="card-icon">◇</span> 词云形状</h2>
-        <div class="shape-grid" id="shape-grid"></div>
-        <label class="upload-zone" for="mask-upload">
-          <span class="upload-icon">📁</span>
-          <span>上传自定义形状图</span>
-          <span class="upload-hint">黑色剪影/轮廓 · 白底或透明底 · 词语沿轮廓边缘排列</span>
-        </label>
-        <input id="mask-upload" type="file" accept="image/*" hidden>
+        <p class="field-hint">有网络时自动使用 jieba 分词 · 词云最多显示 50 个高频词 · Ctrl+Enter 提交</p>
       </section>
 
       <section class="panel-stats">
         <div class="stat"><span class="stat-value" id="stat-total">0</span><span class="stat-label">总词次</span></div>
-        <div class="stat"><span class="stat-value" id="stat-unique">0</span><span class="stat-label">不同词汇</span></div>
+        <div class="stat"><span class="stat-value" id="stat-unique">0</span><span class="stat-label">词云词汇</span></div>
       </section>
 
       <details class="panel-more">
@@ -126,7 +135,7 @@
         </div>
       </details>
 
-      <footer class="panel-footer">录入端 · 轮廓词云 · 版本 20260529 · 数据保存在本机浏览器</footer>
+      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260616 · 数据保存在本机浏览器</footer>
     </aside>
   </div>
 
@@ -136,15 +145,17 @@
     <p id="boot-error-msg"></p>
   </div>
 
-  <script src="js/vendor/echarts.min.js?v=20260529"></script>
-  <script src="js/vendor/echarts-wordcloud.min.js?v=20260529"></script>
-  <script src="js/filter.js?v=20260529"></script>
-  <script src="js/stopwords.js?v=20260529"></script>
-  <script src="js/segment.js?v=20260529"></script>
-  <script src="js/masks.js?v=20260529"></script>
-  <script src="js/sync.js?v=20260529"></script>
-  <script src="js/store.js?v=20260529"></script>
-  <script src="js/chart.js?v=20260529"></script>
-  <script src="js/app.js?v=20260529"></script>
+  <script src="js/vendor/echarts.min.js?v=20260616"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js?v=20260616"></script>
+  <script src="js/config.js?v=20260616"></script>
+  <script src="js/filter.js?v=20260616"></script>
+  <script src="js/stopwords.js?v=20260616"></script>
+  <script src="js/segment.js?v=20260616"></script>
+  <script src="js/masks.js?v=20260616"></script>
+  <script src="js/sync.js?v=20260616"></script>
+  <script src="js/store.js?v=20260616"></script>
+  <script src="js/chart.js?v=20260616"></script>
+  <script src="js/demo-sample.js?v=20260616"></script>
+  <script src="js/app.js?v=20260616"></script>
 </body>
 </html>

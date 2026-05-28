@@ -2,19 +2,48 @@
 
 from __future__ import annotations
 
+import cgi
 import http.server
 import json
 import queue
 import socket
 import socketserver
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
 from pathlib import Path
 
+try:
+    import speech_recognition as sr
+
+    HAS_SPEECH = True
+except ImportError:
+    HAS_SPEECH = False
+
+try:
+    import jieba
+
+    HAS_JIEBA = True
+except ImportError:
+    HAS_JIEBA = False
+
 WEB_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = WEB_DIR.parent
 STATE_FILE = WEB_DIR / "data" / "sync-state.json"
+KEYWORDS_DICT = PROJECT_ROOT / "data" / "keywords.txt"
+
+SEGMENT_STOPWORDS = {
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
+    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着", "没有",
+    "看", "好", "自己", "这", "那", "他", "她", "它", "们", "与", "及", "等",
+    "可以", "能够", "通过", "进行", "以及", "其中", "这种", "这些", "那些",
+    "作为", "已经", "以及", "多个", "不同", "整个", "不仅", "而是", "例如",
+}
+
+if HAS_JIEBA and KEYWORDS_DICT.exists():
+    jieba.load_userdict(str(KEYWORDS_DICT))
 DEFAULT_PORTS = (8765, 8766, 8767, 8080, 3000)
 
 DEFAULT_STATE = {
@@ -139,6 +168,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/state":
             self._send_json(STATE.get())
             return
+        if self.path == "/api/segment/health":
+            self._send_json({
+                "available": HAS_JIEBA,
+                "engine": "jieba" if HAS_JIEBA else None,
+            })
+            return
         if self.path == "/api/events":
             self._handle_sse()
             return
@@ -156,7 +191,93 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             snapshot = STATE.update(data)
             self._send_json(snapshot)
             return
+        if self.path == "/api/transcribe":
+            self._handle_transcribe()
+            return
+        if self.path == "/api/segment":
+            self._handle_segment()
+            return
         self.send_error(404)
+
+    def _handle_segment(self) -> None:
+        if not HAS_JIEBA:
+            self._send_json(
+                {"error": "jieba_not_installed", "words": []},
+                status=501,
+            )
+            return
+
+        import re
+
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b"{}"
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self.send_error(400, "Invalid JSON")
+            return
+
+        text = (data.get("text") or "").strip()
+        if not text:
+            self._send_json({"words": [], "engine": "jieba"})
+            return
+
+        words: list[str] = []
+        for word in jieba.cut(text):
+            word = word.strip()
+            if len(word) < 2:
+                continue
+            if word in SEGMENT_STOPWORDS:
+                continue
+            if re.fullmatch(r"[\W_]+", word):
+                continue
+            words.append(word)
+
+        self._send_json({"words": words, "engine": "jieba"})
+
+    def _handle_transcribe(self) -> None:
+        if not HAS_SPEECH:
+            self._send_json(
+                {"error": "server_missing_speech", "text": ""},
+                status=501,
+            )
+            return
+
+        ctype = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ctype:
+            self.send_error(400, "Expected multipart form")
+            return
+
+        try:
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    "REQUEST_METHOD": "POST",
+                    "CONTENT_TYPE": ctype,
+                    "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+                },
+            )
+            item = form["audio"] if "audio" in form else None
+            if not item or not getattr(item, "file", None):
+                self.send_error(400, "Missing audio file")
+                return
+
+            suffix = Path(getattr(item, "filename", "") or "audio.wav").suffix or ".wav"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(item.file.read())
+                tmp_path = tmp.name
+
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(tmp_path) as source:
+                audio = recognizer.record(source)
+            text = recognizer.recognize_google(audio, language="zh-CN")
+            Path(tmp_path).unlink(missing_ok=True)
+            self._send_json({"text": text})
+        except sr.UnknownValueError:
+            self._send_json({"text": "", "error": "no_speech"})
+        except Exception as exc:
+            self._send_json({"text": "", "error": str(exc)}, status=500)
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -217,6 +338,15 @@ def pick_port() -> int:
     raise OSError("无法找到可用端口")
 
 
+def local_ip() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
+
+
 def main() -> None:
     if not (WEB_DIR / "index.html").exists():
         print(f"错误: 未找到 index.html，目录: {WEB_DIR}")
@@ -224,6 +354,8 @@ def main() -> None:
 
     port = pick_port()
     base = f"http://127.0.0.1:{port}"
+    lan = local_ip()
+    lan_base = f"http://{lan}:{port}" if lan else None
 
     try:
         httpd = ThreadingHTTPServer(("", port), Handler)
@@ -237,6 +369,12 @@ def main() -> None:
     print("=" * 54)
     print(f"  控制台（录入）: {base}/")
     print(f"  大屏展示:       {base}/display.html")
+    if lan_base:
+        print(f"  局域网访问:     {lan_base}/")
+    if HAS_JIEBA:
+        print("  分词引擎:       jieba（/api/segment）")
+    else:
+        print("  分词引擎:       未安装 jieba，请运行 pip install jieba")
     print("  按 Ctrl+C 停止")
     print("=" * 54)
 

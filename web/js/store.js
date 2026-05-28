@@ -17,6 +17,9 @@ const WordStore = (() => {
   let customMaskImage = null;
   let revision = 0;
 
+  /** 词云图最多展示的高频词数量 */
+  const MAX_CLOUD_WORDS = 50;
+
   function mergeMaps(a, b) {
     const out = new Map(a);
     for (const [k, v] of b) out.set(k, (out.get(k) || 0) + v);
@@ -159,17 +162,27 @@ const WordStore = (() => {
     return displaySource === "voice" ? voiceFrequencies : manualFrequencies;
   }
 
-  function getList() {
+  function getFullList() {
     return Array.from(getActiveMap().entries())
       .filter(([word]) => !StopwordsFilter.isStopword(word))
       .sort((a, b) => b[1] - a[1]);
   }
 
+  function getList() {
+    return getFullList().slice(0, MAX_CLOUD_WORDS);
+  }
+
   function getStats() {
+    const full = getFullList();
     const list = getList();
     let total = 0;
-    for (const [, count] of list) total += count;
-    return { total, unique: list.length };
+    for (const [, count] of full) total += count;
+    return {
+      total,
+      unique: full.length,
+      displayed: list.length,
+      maxDisplay: MAX_CLOUD_WORDS,
+    };
   }
 
   function isEmpty() {
@@ -258,7 +271,9 @@ const WordStore = (() => {
     STORAGE_KEY,
     addWords,
     getList,
+    getFullList,
     getStats,
+    MAX_CLOUD_WORDS,
     isEmpty,
     isAllEmpty,
     clearDisplay,

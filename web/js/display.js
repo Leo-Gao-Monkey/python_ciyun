@@ -19,6 +19,7 @@
   const statTotal = document.getElementById("stat-total");
   const statUnique = document.getElementById("stat-unique");
   const displaySourceEl = document.getElementById("display-source");
+  const shapeOutlineGuide = document.getElementById("shape-outline-guide");
 
   const SOURCE_LABELS = { voice: "语音词云", manual: "手动词云", all: "全部词云" };
 
@@ -66,20 +67,46 @@
     setSyncStatus(true);
   }
 
+  async function updateShapeOutlineGuide() {
+    if (!shapeOutlineGuide) return;
+    const { shapeMask, customMaskImage } = WordStore.getShapeMask();
+    const shape = shapeMask === "custom" ? "custom" : shapeMask;
+    try {
+      if (shape === "custom" && customMaskImage) {
+        ShapeMask.setCustomMask(customMaskImage);
+      }
+      const { w, h } = ShapeMask.MASK_SIZE;
+      const canvas = await ShapeMask.getOutlineGuide(shape, w, h);
+      if (canvas) {
+        shapeOutlineGuide.style.backgroundImage = `url(${canvas.toDataURL("image/png")})`;
+        shapeOutlineGuide.classList.add("is-visible");
+      } else {
+        shapeOutlineGuide.style.backgroundImage = "";
+        shapeOutlineGuide.classList.remove("is-visible");
+      }
+    } catch (_) {
+      shapeOutlineGuide.style.backgroundImage = "";
+      shapeOutlineGuide.classList.remove("is-visible");
+    }
+  }
+
   async function refreshChart() {
     if (renderPending) return;
     renderPending = true;
     const list = WordStore.getList();
     const { shapeMask, customMaskImage } = WordStore.getShapeMask();
     emptyHint.classList.toggle("hidden", list.length > 0);
-    await WordCloudChart.render(list, shapeMask, customMaskImage);
+    await Promise.all([
+      WordCloudChart.render(list, shapeMask, customMaskImage),
+      updateShapeOutlineGuide(),
+    ]);
     renderPending = false;
   }
 
   function updateStats() {
-    const { total, unique } = WordStore.getStats();
+    const { total, unique, displayed } = WordStore.getStats();
     statTotal.textContent = total;
-    statUnique.textContent = unique;
+    statUnique.textContent = unique > displayed ? `${displayed}/${unique}` : String(unique);
   }
 
   function updateSourceLabel() {

@@ -71,12 +71,15 @@
     0 20px 60px rgba(91, 111, 214, 0.12);
 }
 
-.display-stage .stage-body {
+.display-stage .stage-body,
+.display-stage .stage-body-cloud {
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin: 12px;
-  min-height: 0;
+  width: 88%;
+  max-width: 100%;
+  margin: 12px auto;
+  min-height: 500px;
   border-radius: 18px;
   background:
     radial-gradient(ellipse 80% 65% at 50% 44%, rgba(124, 147, 255, 0.12), transparent 70%),
@@ -84,7 +87,7 @@
 }
 
 .display-stage .wordcloud-chart {
-  min-height: 400px;
+  min-height: 480px;
 }
 
 @media (max-width: 768px) {
@@ -143,13 +146,14 @@
     border-radius: 18px;
   }
 
-  .display-stage .stage-body {
-    min-height: 50vh;
-    min-height: 50dvh;
+  .display-stage .stage-body,
+  .display-stage .stage-body-cloud {
+    width: 100%;
+    min-height: 500px;
   }
 
   .display-stage .wordcloud-chart {
-    min-height: 280px;
+    min-height: 440px;
   }
 }
 

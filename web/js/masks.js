@@ -1,25 +1,117 @@
 /**
- * 词云形状 Mask：仅轮廓环带区域可排词（文字沿形状边缘显示）
- * ECharts wordCloud 规则：mask 白色区域可放置文字，黑色为透明背景
+ * 词云形状 Mask：词语填满形状内部（白=可排词，黑=透明背景）
+ * 对应需求：矩形 / 圆形 / 心形 / 星形 / 云朵 / 菱形
  */
 const ShapeMask = (() => {
   /** @type {Map<string, HTMLCanvasElement>} */
   const cache = new Map();
+  const outlineCache = new Map();
   let customMaskDataUrl = null;
 
   const SHAPES = {
-    rectangle: { label: "矩形", icon: "▭" },
-    circle: { label: "圆形", icon: "●" },
-    heart: { label: "心形", icon: "♥" },
-    star: { label: "星形", icon: "★" },
-    cloud: { label: "云朵", icon: "☁" },
-    diamond: { label: "菱形", icon: "◆" },
+    rectangle: { label: "矩形", icon: "▭", pyecharts: "rect" },
+    circle: { label: "圆形", icon: "●", pyecharts: "circle" },
+    heart: { label: "心形", icon: "♥", pyecharts: "heart" },
+    star: { label: "星形", icon: "★", pyecharts: "star" },
+    cloud: { label: "云朵", icon: "☁", pyecharts: "cloud" },
+    diamond: { label: "菱形", icon: "◆", pyecharts: "diamond" },
   };
 
-  const MASK_SIZE = { w: 1200, h: 900 };
+  const MASK_SIZE = { w: 500, h: 350 };
+
+  const REF = { w: 500, h: 350 };
+
+  function refScale(w, h) {
+    return { sx: w / REF.w, sy: h / REF.h };
+  }
+
+  /** 与「词云预期效果.html」一致的黑色实心遮罩（maskImage 直接使用） */
+  function buildReferenceMask(shape, width, height) {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#000000";
+    const drawer = REF_DRAWERS[shape];
+    if (drawer) drawer(ctx, width, height);
+    return canvas;
+  }
+
+  function drawRefRectangle(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    ctx.fillRect(40 * sx, 70 * sy, 420 * sx, 210 * sy);
+  }
+
+  function drawRefCircle(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    ctx.beginPath();
+    ctx.arc(250 * sx, 175 * sy, 135 * Math.min(sx, sy), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawRefHeart(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    ctx.beginPath();
+    ctx.moveTo(250 * sx, 295 * sy);
+    ctx.bezierCurveTo(60 * sx, 185 * sy, 90 * sx, 55 * sy, 190 * sx, 85 * sy);
+    ctx.bezierCurveTo(225 * sx, 95 * sy, 240 * sx, 120 * sy, 250 * sx, 145 * sy);
+    ctx.bezierCurveTo(260 * sx, 120 * sy, 275 * sx, 95 * sy, 310 * sx, 85 * sy);
+    ctx.bezierCurveTo(410 * sx, 55 * sy, 440 * sx, 185 * sy, 250 * sx, 295 * sy);
+    ctx.fill();
+  }
+
+  function drawRefStar(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    const cx = 250 * sx;
+    const cy = 175 * sy;
+    const outer = 150 * Math.min(sx, sy);
+    const inner = 65 * Math.min(sx, sy);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const angle = (Math.PI / 5) * i - Math.PI / 2;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawRefCloud(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    ctx.beginPath();
+    ctx.arc(170 * sx, 190 * sy, 75 * Math.min(sx, sy), Math.PI * 0.5, Math.PI * 1.5);
+    ctx.arc(225 * sx, 120 * sy, 85 * Math.min(sx, sy), Math.PI, Math.PI * 1.85);
+    ctx.arc(315 * sx, 130 * sy, 80 * Math.min(sx, sy), Math.PI * 1.15, Math.PI * 2);
+    ctx.arc(360 * sx, 200 * sy, 70 * Math.min(sx, sy), Math.PI * 1.5, Math.PI * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(165 * sx, 160 * sy, 205 * sx, 105 * sy);
+  }
+
+  function drawRefDiamond(ctx, w, h) {
+    const { sx, sy } = refScale(w, h);
+    ctx.beginPath();
+    ctx.moveTo(250 * sx, 35 * sy);
+    ctx.lineTo(455 * sx, 175 * sy);
+    ctx.lineTo(250 * sx, 315 * sy);
+    ctx.lineTo(45 * sx, 175 * sy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const REF_DRAWERS = {
+    rectangle: drawRefRectangle,
+    circle: drawRefCircle,
+    heart: drawRefHeart,
+    star: drawRefStar,
+    cloud: drawRefCloud,
+    diamond: drawRefDiamond,
+  };
 
   function cacheKey(shape, w, h) {
-    return `outline-v3-${shape}-${w}-${h}-${customMaskDataUrl ? "c" : ""}`;
+    return `ref-demo-v1-${shape}-${w}-${h}-${customMaskDataUrl ? "c" : ""}`;
   }
 
   function createCanvas(w, h) {
@@ -29,8 +121,24 @@ const ShapeMask = (() => {
     return c;
   }
 
-  function fillWhite(ctx) {
-    ctx.fillStyle = "#ffffff";
+  function binaryFromBlackMaskCanvas(canvas) {
+    const ctx = canvas.getContext("2d");
+    const { width, height, data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const bin = new Uint8Array(width * height);
+    for (let p = 0; p < width * height; p++) {
+      const i = p * 4;
+      bin[p] = data[i + 3] > 127 && data[i] + data[i + 1] + data[i + 2] < 384 ? 1 : 0;
+    }
+    return bin;
+  }
+
+  function solidFromDrawer(shape, width, height) {
+    return binaryFromBlackMaskCanvas(buildReferenceMask(shape, width, height));
+  }
+
+  /** 实心 mask：与预期效果 HTML 相同，黑色区域可排词 */
+  function buildShapeMask(shape, width, height) {
+    return buildReferenceMask(shape, width, height);
   }
 
   function binaryFromImageData(data, width, height) {
@@ -41,34 +149,22 @@ const ShapeMask = (() => {
     return bin;
   }
 
-  function writeBinaryToImageData(data, binary, width, height) {
+  function canvasFromBinaryBlackMask(binary, width, height) {
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    const imageData = ctx.createImageData(width, height);
+    const { data } = imageData;
     for (let p = 0; p < width * height; p++) {
-      const v = binary[p] ? 255 : 0;
-      data[p * 4] = data[p * 4 + 1] = data[p * 4 + 2] = v;
-      data[p * 4 + 3] = 255;
-    }
-  }
-
-  function dilateBinary(binary, width, height, radius) {
-    if (radius <= 0) return binary.slice();
-    const src = binary;
-    const out = new Uint8Array(width * height);
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (!src[y * width + x]) continue;
-        for (let dy = -radius; dy <= radius; dy++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            if (dx * dx + dy * dy > radius * radius) continue;
-            const nx = x + dx;
-            const ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-              out[ny * width + nx] = 1;
-            }
-          }
-        }
+      const i = p * 4;
+      if (binary[p]) {
+        data[i] = data[i + 1] = data[i + 2] = 0;
+        data[i + 3] = 255;
+      } else {
+        data[i + 3] = 0;
       }
     }
-    return out;
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
   }
 
   function erodeBinary(binary, width, height, radius) {
@@ -94,143 +190,31 @@ const ShapeMask = (() => {
     return out;
   }
 
-  /** 实心形状 → 仅保留边缘环带（词语沿轮廓排列） */
-  function solidToOutlineRing(solid, width, height, bandWidth) {
-    let band = Math.max(4, Math.round(bandWidth));
-    let inner = erodeBinary(solid, width, height, band);
-    let edge = new Uint8Array(width * height);
-    let count = 0;
-
-    for (let attempt = 0; attempt < 6; attempt++) {
-      edge.fill(0);
-      count = 0;
-      for (let p = 0; p < width * height; p++) {
-        if (solid[p] && !inner[p]) {
-          edge[p] = 1;
-          count++;
+  function dilateBinary(binary, width, height, radius) {
+    if (radius <= 0) return binary.slice();
+    const src = binary;
+    const out = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (!src[y * width + x]) continue;
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            if (dx * dx + dy * dy > radius * radius) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              out[ny * width + nx] = 1;
+            }
+          }
         }
       }
-      if (count > width * 0.002) break;
-      band = Math.max(2, Math.floor(band * 0.65));
-      inner = erodeBinary(solid, width, height, band);
     }
-
-    if (count < width * 0.001) {
-      return dilateBinary(solid, width, height, 1);
-    }
-
-    const thicken = Math.max(1, Math.round(Math.min(width, height) * 0.004));
-    return dilateBinary(edge, width, height, thicken);
-  }
-
-  function computeBandWidth(width, height, shape) {
-    const base = Math.min(width, height) * (shape === "rectangle" ? 0.028 : 0.024);
-    return Math.max(8, Math.min(Math.round(base), 28));
+    return out;
   }
 
   function canvasFromBinary(binary, width, height) {
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
-    const imageData = ctx.createImageData(width, height);
-    writeBinaryToImageData(imageData.data, binary, width, height);
-    ctx.putImageData(imageData, 0, 0);
-    return canvas;
+    return canvasFromBinaryBlackMask(binary, width, height);
   }
-
-  function buildOutlineMaskFromSolid(solid, width, height, shape) {
-    const band = computeBandWidth(width, height, shape);
-    const edge = solidToOutlineRing(solid, width, height, band);
-    return canvasFromBinary(edge, width, height);
-  }
-
-  function drawRectangle(ctx, w, h) {
-    fillWhite(ctx);
-    const pad = Math.min(w, h) * 0.06;
-    ctx.fillRect(pad, pad, w - pad * 2, h - pad * 2);
-  }
-
-  function drawCircle(ctx, w, h) {
-    const r = Math.min(w, h) * 0.46;
-    fillWhite(ctx);
-    ctx.beginPath();
-    ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function drawHeart(ctx, w, h) {
-    const cx = w / 2;
-    const cy = h / 2;
-    const size = Math.min(w, h) * 0.44;
-    fillWhite(ctx);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy + size * 0.95);
-    ctx.bezierCurveTo(cx - size * 1.6, cy + size * 0.2, cx - size * 0.9, cy - size * 0.7, cx, cy - size * 0.15);
-    ctx.bezierCurveTo(cx + size * 0.9, cy - size * 0.7, cx + size * 1.6, cy + size * 0.2, cx, cy + size * 0.95);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function drawStar(ctx, w, h) {
-    const cx = w / 2;
-    const cy = h / 2;
-    const outer = Math.min(w, h) * 0.47;
-    const inner = outer * 0.4;
-    fillWhite(ctx);
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? outer : inner;
-      const a = (Math.PI / 5) * i - Math.PI / 2;
-      const x = cx + Math.cos(a) * r;
-      const y = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function drawDiamond(ctx, w, h) {
-    const cx = w / 2;
-    const cy = h / 2;
-    const rw = Math.min(w, h) * 0.46;
-    const rh = Math.min(w, h) * 0.52;
-    fillWhite(ctx);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - rh);
-    ctx.lineTo(cx + rw, cy);
-    ctx.lineTo(cx, cy + rh);
-    ctx.lineTo(cx - rw, cy);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function drawCloud(ctx, w, h) {
-    fillWhite(ctx);
-    const cx = w / 2;
-    const cy = h / 2;
-    const base = Math.min(w, h) * 0.14;
-    const blobs = [
-      [cx - base * 2.2, cy + base * 0.3, base * 1.55],
-      [cx - base * 0.8, cy - base * 0.5, base * 1.85],
-      [cx + base * 1.2, cy - base * 0.3, base * 1.65],
-      [cx + base * 2.5, cy + base * 0.5, base * 1.35],
-      [cx, cy + base * 0.8, base * 2.25],
-    ];
-    for (const [x, y, r] of blobs) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  const DRAWERS = {
-    rectangle: drawRectangle,
-    circle: drawCircle,
-    heart: drawHeart,
-    star: drawStar,
-    cloud: drawCloud,
-    diamond: drawDiamond,
-  };
 
   function fillInteriorHoles(data, width, height) {
     const white = (p) => data[p * 4] > 127;
@@ -297,17 +281,73 @@ const ShapeMask = (() => {
     return binaryFromImageData(data, width, height);
   }
 
-  function buildShapeMask(shape, width, height) {
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, width, height);
-    const drawer = DRAWERS[shape] || drawCircle;
-    drawer(ctx, width, height);
+  /** 虚化轮廓：形状整体淡色填充 + Canvas 高斯模糊（预期效果图） */
+  function buildOutlineGuideFromSolid(solid, width, height) {
+    const band = Math.max(4, Math.round(Math.min(width, height) * 0.014));
+    const inner = erodeBinary(solid, width, height, band);
 
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const solid = binaryFromImageData(imageData.data, width, height);
-    return buildOutlineMaskFromSolid(solid, width, height, shape);
+    const src = createCanvas(width, height);
+    const sctx = src.getContext("2d");
+    const imageData = sctx.createImageData(width, height);
+    const { data } = imageData;
+
+    for (let p = 0; p < width * height; p++) {
+      if (!solid[p]) continue;
+      const i = p * 4;
+      const isEdge = !inner[p];
+      data[i] = 118;
+      data[i + 1] = 142;
+      data[i + 2] = 218;
+      data[i + 3] = isEdge ? 130 : 55;
+    }
+    sctx.putImageData(imageData, 0, 0);
+
+    const out = createCanvas(width, height);
+    const octx = out.getContext("2d");
+    const blurPx = Math.max(8, Math.round(Math.min(width, height) * 0.028));
+    octx.filter = `blur(${blurPx}px)`;
+    octx.drawImage(src, 0, 0);
+    octx.filter = "none";
+
+    octx.globalAlpha = 0.55;
+    octx.filter = `blur(${Math.max(4, Math.round(blurPx * 0.45))}px)`;
+    octx.drawImage(src, 0, 0);
+    octx.globalAlpha = 1;
+    octx.filter = "none";
+
+    return out;
+  }
+
+  function buildOutlineGuide(shape, width, height) {
+    const solid = solidFromDrawer(shape, width, height);
+    return buildOutlineGuideFromSolid(solid, width, height);
+  }
+
+  function buildCustomOutlineGuide(dataUrl, width, height) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, width, height);
+        const scale = Math.min(width / img.width, height / img.height) * 0.88;
+        const dw = img.width * scale;
+        const dh = img.height * scale;
+        const dx = (width - dw) / 2;
+        const dy = (height - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+        let solid = imageDataToSolidSilhouette(ctx.getImageData(0, 0, width, height));
+        let filled = 0;
+        for (let p = 0; p < solid.length; p++) filled += solid[p];
+        if (filled < width * height * 0.005) {
+          solid = dilateBinary(solid, width, height, 2);
+        }
+        resolve(buildOutlineGuideFromSolid(solid, width, height));
+      };
+      img.onerror = () => reject(new Error("无法加载自定义形状"));
+      img.src = dataUrl;
+    });
   }
 
   function buildCustomMask(dataUrl, width, height) {
@@ -326,8 +366,7 @@ const ShapeMask = (() => {
         const dy = (height - dh) / 2;
 
         ctx.drawImage(img, dx, dy, dw, dh);
-        const imageData = ctx.getImageData(0, 0, width, height);
-        let solid = imageDataToSolidSilhouette(imageData);
+        let solid = imageDataToSolidSilhouette(ctx.getImageData(0, 0, width, height));
 
         let filled = 0;
         for (let p = 0; p < solid.length; p++) filled += solid[p];
@@ -335,7 +374,7 @@ const ShapeMask = (() => {
           solid = dilateBinary(solid, width, height, 2);
         }
 
-        resolve(buildOutlineMaskFromSolid(solid, width, height, "custom"));
+        resolve(canvasFromBinary(solid, width, height));
       };
       img.onerror = () => reject(new Error("无法加载自定义形状图片"));
       img.src = dataUrl;
@@ -359,14 +398,34 @@ const ShapeMask = (() => {
     return Promise.resolve(cache.get(key));
   }
 
+  function getOutlineGuide(shape, width, height) {
+    const oKey = `outline-blur-v2-${shape}-${width}-${height}-${customMaskDataUrl ? "c" : ""}`;
+    if (outlineCache.has(oKey)) {
+      return Promise.resolve(outlineCache.get(oKey));
+    }
+
+    if (shape === "custom" && customMaskDataUrl) {
+      return buildCustomOutlineGuide(customMaskDataUrl, width, height).then((canvas) => {
+        outlineCache.set(oKey, canvas);
+        return canvas;
+      });
+    }
+
+    const canvas = buildOutlineGuide(shape, width, height);
+    outlineCache.set(oKey, canvas);
+    return Promise.resolve(canvas);
+  }
+
   function setCustomMask(dataUrl) {
     customMaskDataUrl = dataUrl;
     cache.clear();
+    outlineCache.clear();
   }
 
   function clearCustomMask() {
     customMaskDataUrl = null;
     cache.clear();
+    outlineCache.clear();
   }
 
   function getCustomMaskDataUrl() {
@@ -375,12 +434,14 @@ const ShapeMask = (() => {
 
   function invalidateCache() {
     cache.clear();
+    outlineCache.clear();
   }
 
   return {
     SHAPES,
     MASK_SIZE,
     getMask,
+    getOutlineGuide,
     setCustomMask,
     clearCustomMask,
     getCustomMaskDataUrl,
