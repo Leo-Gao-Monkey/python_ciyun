@@ -4,16 +4,14 @@
 
 ## 在线访问（GitHub Pages）
 
-部署完成后，访问地址形如：
+部署完成后，访问地址：
 
 ```
-https://<你的用户名>.github.io/<仓库名>/
+https://leo-gao-monkey.github.io/python_ciyun/
 ```
 
-例如仓库名为 `ciyun`：
-
-- **控制台（录入）**：`https://username.github.io/ciyun/`
-- **大屏展示**：`https://username.github.io/ciyun/display.html`
+- **控制台（录入）**：https://leo-gao-monkey.github.io/python_ciyun/
+- **大屏展示**：https://leo-gao-monkey.github.io/python_ciyun/display.html
 
 > 建议使用 **Chrome** 或 **Edge** 浏览器。语音功能需要 **HTTPS**（GitHub Pages 默认支持），首次使用需允许麦克风权限。
 
@@ -27,7 +25,7 @@ git init
 git add .
 git commit -m "Initial commit: word cloud kiosk web app"
 git branch -M main
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+git remote add origin https://github.com/Leo-Gao-Monkey/python_ciyun.git
 git push -u origin main
 ```
 
