@@ -15,6 +15,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo  检查语音/分词依赖（首次可能需几分钟）...
+python -m pip install -q jieba openai-whisper av 2>nul
+
+echo  启动后台助手（供页面「启动本地服务」按钮使用）...
+start "" /min pythonw "%~dp0launcher.py"
+timeout /t 1 /nobreak >nul
+
 python serve.py
 if errorlevel 1 (
     echo.

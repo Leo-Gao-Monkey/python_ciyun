@@ -676,6 +676,134 @@ body.console-layout {
   color: #fcd34d;
 }
 
+.local-server-box {
+  margin: 0 14px 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(124, 147, 255, 0.45);
+  background: rgba(124, 147, 255, 0.08);
+}
+
+.local-server-box.hidden {
+  display: none;
+}
+
+.local-server-hint {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  line-height: 1.45;
+}
+
+.local-server-note {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.local-server-note code {
+  font-size: 0.7rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.btn-start-local-server {
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.28);
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.btn-start-local-server:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.35);
+}
+
+.btn-start-local-server:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.btn-mobile-browser-voice {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(124, 147, 255, 0.45);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--accent);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-mobile-browser-voice.hidden {
+  display: none;
+}
+
+.mobile-lan-box {
+  margin: 0 14px 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.mobile-lan-box.hidden {
+  display: none;
+}
+
+.mobile-lan-title {
+  margin: 0 0 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #059669;
+}
+
+.mobile-lan-url {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.mobile-voice-tip {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #4338ca;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.mobile-voice-tip.hidden {
+  display: none;
+}
+
+.btn-copy-lan-url {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #10b981;
+  color: #fff;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 @keyframes pulse-badge {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
@@ -687,6 +815,16 @@ body.console-layout {
   border-radius: var(--radius-sm);
   padding: 14px;
   margin-bottom: 10px;
+}
+
+.panel-card.panel-source-section.panel-hidden {
+  display: none;
+}
+
+.control-panel[data-panel-mode="all"] .panel-source-section + .panel-source-section {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
 }
 
 .card-title {
@@ -708,6 +846,18 @@ body.console-layout {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.client-badge {
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(91, 111, 214, 0.12);
+  color: var(--accent);
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .rec-toolbar {
@@ -853,6 +1003,17 @@ body.console-layout {
   min-height: 72px;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.speech-editor.is-recording {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 147, 255, 0.28);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.interim-text.is-live {
+  font-weight: 600;
+  color: #4f46e5;
 }
 
 .speech-editor:focus {
@@ -1481,6 +1642,16 @@ body.console-layout {
     white-space: normal;
     line-height: 1.25;
     padding: 8px 6px;
+  }
+
+  .rec-toolbar {
+    flex-direction: column;
+  }
+
+  .btn-rec {
+    min-height: var(--touch-min);
+    width: 100%;
+    font-size: 0.9rem;
   }
 }
 

@@ -1,15 +1,17 @@
 /**
- * 词频存储 - 语音与手动分开展示
+ * 词频存储 - 本机独立（语音 + 手动），「全部」= 本机语音 + 本机手动
+ * 词云数据不同步到其他浏览器；仅同步背景/形状等展示设置（可选）
  */
 const WordStore = (() => {
   const STORAGE_KEY = "ciyun-kiosk-v4";
+  const CLIENT_ID = ClientSession.getClientId();
 
-  /** @type {Map<string, number>} */
+  /** @type {Map<string, number>} 本机语音词库 */
   let voiceFrequencies = new Map();
-  /** @type {Map<string, number>} */
+  /** @type {Map<string, number>} 本机手动词库 */
   let manualFrequencies = new Map();
-  /** @type {'voice'|'manual'|'all'} */
-  let displaySource = "voice";
+  /** @type {'voice'|'manual'|'all'} 仅本机 UI */
+  let displaySource = ClientSession.getDisplaySource();
 
   let background = "gradient-1";
   let customBgImage = null;
@@ -17,7 +19,6 @@ const WordStore = (() => {
   let customMaskImage = null;
   let revision = 0;
 
-  /** 词云图最多展示的高频词数量 */
   const MAX_CLOUD_WORDS = 50;
 
   function mergeMaps(a, b) {
@@ -43,7 +44,7 @@ const WordStore = (() => {
       revision,
       voiceFrequencies: mapToObj(voiceFrequencies),
       manualFrequencies: mapToObj(manualFrequencies),
-      displaySource,
+      clientId: CLIENT_ID,
       background,
       customBgImage,
       shapeMask,
@@ -52,28 +53,19 @@ const WordStore = (() => {
     };
   }
 
-  function applySnapshot(data, silent = true) {
+  /** 仅合并背景/形状等展示设置，不覆盖本机词云数据 */
+  function applySnapshot(data) {
     if (!data) return false;
-    if (data.revision != null && data.revision <= revision && revision > 0) {
-      return false;
-    }
 
-    // 兼容 v3 单 map 数据
-    if (data.frequencies && !data.voiceFrequencies) {
-      manualFrequencies = objToMap(data.frequencies);
-      voiceFrequencies = new Map();
-    } else {
-      voiceFrequencies = objToMap(data.voiceFrequencies);
-      manualFrequencies = objToMap(data.manualFrequencies);
-    }
+    const isNewer = data.revision == null || data.revision > revision || revision === 0;
+    if (!isNewer) return false;
 
-    displaySource = data.displaySource || "voice";
-    background = data.background || "gradient-1";
-    customBgImage = data.customBgImage || null;
-    shapeMask = data.shapeMask || "circle";
+    background = data.background || background;
+    customBgImage = data.customBgImage ?? customBgImage;
+    shapeMask = data.shapeMask || shapeMask;
     if (shapeMask === "china") shapeMask = "circle";
-    customMaskImage = data.customMaskImage || null;
-    revision = data.revision || revision;
+    customMaskImage = data.customMaskImage ?? customMaskImage;
+    revision = data.revision ?? revision;
 
     if (customMaskImage) ShapeMask.setCustomMask(customMaskImage);
     else if (shapeMask !== "custom") ShapeMask.clearCustomMask();
@@ -105,11 +97,26 @@ const WordStore = (() => {
   function load() {
     try {
       let raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        raw = localStorage.getItem("ciyun-kiosk-v3");
-      }
+      if (!raw) raw = localStorage.getItem("ciyun-kiosk-v3");
       if (!raw) return;
-      applySnapshot(JSON.parse(raw), true);
+      const data = JSON.parse(raw);
+
+      if (data.voiceByClient?.[CLIENT_ID]) {
+        voiceFrequencies = objToMap(data.voiceByClient[CLIENT_ID]);
+      } else if (data.voiceFrequencies) {
+        voiceFrequencies = objToMap(data.voiceFrequencies);
+      }
+
+      if (data.manualFrequencies) manualFrequencies = objToMap(data.manualFrequencies);
+      else if (data.frequencies) manualFrequencies = objToMap(data.frequencies);
+
+      background = data.background || background;
+      customBgImage = data.customBgImage || null;
+      shapeMask = data.shapeMask || shapeMask;
+      if (shapeMask === "china") shapeMask = "circle";
+      customMaskImage = data.customMaskImage || null;
+      revision = data.revision || 0;
+      displaySource = ClientSession.getDisplaySource();
     } catch (err) {
       console.warn("读取本地数据失败", err);
       voiceFrequencies = new Map();
@@ -153,7 +160,6 @@ const WordStore = (() => {
     return { added, blocked, stopped };
   }
 
-  /** 用词汇列表替换指定来源的词频（用于编辑后重新提交） */
   function replaceWords(words, source = "manual") {
     if (!words || words.length === 0) {
       targetMap(source).clear();
@@ -192,7 +198,8 @@ const WordStore = (() => {
 
   function getActiveMap() {
     if (displaySource === "all") return mergeMaps(voiceFrequencies, manualFrequencies);
-    return displaySource === "voice" ? voiceFrequencies : manualFrequencies;
+    if (displaySource === "voice") return voiceFrequencies;
+    return manualFrequencies;
   }
 
   function getFullList() {
@@ -226,7 +233,6 @@ const WordStore = (() => {
     return voiceFrequencies.size === 0 && manualFrequencies.size === 0;
   }
 
-  /** 清空当前展示来源的词云 */
   function clearDisplay() {
     if (displaySource === "all") {
       voiceFrequencies = new Map();
@@ -239,7 +245,6 @@ const WordStore = (() => {
     save();
   }
 
-  /** 清空全部词云数据 */
   function clearAll() {
     voiceFrequencies = new Map();
     manualFrequencies = new Map();
@@ -249,11 +254,15 @@ const WordStore = (() => {
   function setDisplaySource(source) {
     if (displaySource === source) return;
     displaySource = source;
-    save();
+    ClientSession.setDisplaySource(source);
   }
 
   function getDisplaySource() {
     return displaySource;
+  }
+
+  function getClientId() {
+    return CLIENT_ID;
   }
 
   function exportJSON() {
@@ -302,12 +311,14 @@ const WordStore = (() => {
 
   return {
     STORAGE_KEY,
+    CLIENT_ID,
     addWords,
     replaceWords,
     getList,
     getFullList,
     getFullListForSource,
     getStats,
+    getClientId,
     MAX_CLOUD_WORDS,
     isEmpty,
     isAllEmpty,

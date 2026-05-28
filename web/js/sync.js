@@ -113,6 +113,13 @@ const SyncHub = (() => {
     return !isLocalDev && serverAvailable !== true;
   }
 
+  /** 本地 serve.py 或已确认可用的 API 服务 */
+  function canUseBackendApi() {
+    if (isLocalDev) return true;
+    if (serverAvailable === true) return true;
+    return !!(window.CIYUN_CONFIG?.segmentApi);
+  }
+
   function init() {
     listenStorage();
     if (isLocalDev) {
@@ -131,6 +138,8 @@ const SyncHub = (() => {
     fetchRemoteState,
     isServerMode,
     isStaticHost,
+    canUseBackendApi,
+    isLocalDev,
   };
 })();
 

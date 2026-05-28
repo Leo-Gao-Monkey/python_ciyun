@@ -26,6 +26,7 @@
   let renderPending = false;
 
   function init() {
+    WordStore.setDisplaySource("all");
     WordCloudChart.init(chartEl);
     SyncHub.init();
 
@@ -111,8 +112,7 @@
 
   function updateSourceLabel() {
     if (!displaySourceEl) return;
-    const src = WordStore.getDisplaySource();
-    displaySourceEl.textContent = SOURCE_LABELS[src] || "词云";
+    displaySourceEl.textContent = SOURCE_LABELS.all;
   }
 
   function applyBackground() {

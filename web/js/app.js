@@ -18,23 +18,34 @@
   const emptyHint = document.getElementById("empty-hint");
   const syncIndicator = document.getElementById("sync-indicator");
   const sourceTabs = document.getElementById("source-tabs");
+  const controlPanel = document.getElementById("control-panel");
+  const panelSourceSections = document.querySelectorAll("[data-panel-source]");
   const btnClearCloud = document.getElementById("btn-clear-cloud");
   const btnRecStart = document.getElementById("btn-rec-start");
   const btnRecPause = document.getElementById("btn-rec-pause");
   const btnRecEnd = document.getElementById("btn-rec-end");
-  const audioUpload = document.getElementById("audio-upload");
   const btnAdd = document.getElementById("btn-add");
   const btnLoadDemo = document.getElementById("btn-load-demo");
   const btnReset = document.getElementById("btn-reset");
   const btnExport = document.getElementById("btn-export");
   const btnDownload = document.getElementById("btn-download");
-  const btnSubmitSpeech = document.getElementById("btn-submit-speech");
   const btnClearSpeech = document.getElementById("btn-clear-speech");
   const wordInput = document.getElementById("word-input");
   const wordListEditor = document.getElementById("word-list-editor");
+  const speechWordListEditor = document.getElementById("speech-word-list-editor");
   const speechEditor = document.getElementById("speech-editor");
   const interimText = document.getElementById("interim-text");
   const speechStatus = document.getElementById("speech-status");
+  const localServerBox = document.getElementById("local-server-box");
+  const localServerHint = document.getElementById("local-server-hint");
+  const localServerNote = document.getElementById("local-server-note");
+  const btnStartLocalServer = document.getElementById("btn-start-local-server");
+  const btnMobileBrowserVoice = document.getElementById("btn-mobile-browser-voice");
+  const mobileLanBox = document.getElementById("mobile-lan-box");
+  const mobileLanUrl = document.getElementById("mobile-lan-url");
+  const btnCopyLanUrl = document.getElementById("btn-copy-lan-url");
+  const mobileVoiceTip = document.getElementById("mobile-voice-tip");
+  const LAUNCHER_URL = "http://127.0.0.1:8764";
   const statTotal = document.getElementById("stat-total");
   const statUnique = document.getElementById("stat-unique");
   const toast = document.getElementById("toast");
@@ -43,21 +54,43 @@
   const shapeStrip = document.getElementById("shape-strip");
   const shapeOutlineGuide = document.getElementById("shape-outline-guide");
   const segmentEngineEl = document.getElementById("segment-engine");
+  const clientBadgeEl = document.getElementById("client-badge");
 
   let recognition = null;
-  /** @type {'idle'|'recording'|'paused'|'transcribing'} */
+  /** @type {'idle'|'recording'|'paused'} */
   let recorderState = "idle";
   let toastTimer = null;
   let renderPending = false;
   let holdAnchor = "";
+  /** 本会话已确定的识别文本（跨多次 recognition 重启累加） */
   let sessionCommitted = "";
-  let holdFinal = "";
+  /** 当前这一次 recognition 实例内已确定的文本 */
+  let instanceFinal = "";
+  /** 当前正在识别的临时文本 */
   let holdInterim = "";
-  let micGranted = false;
-  let micPreparing = false;
   let stopTimer = null;
   let recognitionBusy = false;
-  let playbackAudio = null;
+  let recognitionStarting = false;
+  let recWatchdog = null;
+  let restartAttempts = 0;
+  let lastSpeechResultAt = 0;
+  const MAX_REC_RESTART = 20;
+  /** @type {'server'|'webspeech'|'none'} */
+  let speechMode = "webspeech";
+  let serverTranscribeOk = false;
+  let serverTranscribeOnCurrentPage = false;
+  let mediaStream = null;
+  let mediaRecorder = null;
+  /** @type {Blob[]} */
+  let transcribeQueue = [];
+  let transcribeBusy = false;
+  let firstServerTranscribe = true;
+  let localServerStarting = false;
+  let localServerPollTimer = null;
+  /** @type {string|null} 本机词云服务地址（由端口扫描得到） */
+  let detectedLocalServerUrl = null;
+  const TRANSCRIBE_SLICE_MS = 2500;
+  const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
   async function init() {
     WordCloudChart.init(chartEl);
@@ -71,6 +104,7 @@
       userDictEl.value = Segmenter.getUserDictText();
     }
     updateSegmentBadge();
+    updateClientBadge();
     await initManualInput();
     bindEvents();
 
@@ -81,9 +115,26 @@
       }
     });
 
-    initSpeech();
-    document.addEventListener("pointerdown", prewarmMicrophone, { once: true, capture: true });
-    prewarmMicrophone();
+    await initSpeech();
+    await updateLocalServerBox();
+    await updateMobileLanBox();
+    setTimeout(async () => {
+      if (shouldUseMobileBrowserSpeech()) return;
+      if (canUseServerSpeechHere()) {
+        updateLocalServerBox();
+        return;
+      }
+      if (await probeServerTranscribe()) {
+        if (canUseServerSpeechHere()) {
+          speechMode = "server";
+          speechStatus.textContent = "本地 Whisper";
+          speechStatus.title = "本地语音识别已就绪，不依赖 Google";
+          speechStatus.classList.remove("unsupported");
+        }
+        updateLocalServerBox();
+        updateMobileLanBox();
+      }
+    }, 2500);
     updateSourceTabs();
     refreshAll();
     SyncHub.fetchRemoteState().then((remote) => {
@@ -100,7 +151,18 @@
     });
     window.addEventListener("online", async () => {
       await Segmenter.probeJiebaApi(true);
+      if (!shouldUseMobileBrowserSpeech()) {
+        await probeServerTranscribe();
+        if (canUseServerSpeechHere()) {
+          speechMode = "server";
+          speechStatus.textContent = "本地 Whisper";
+          speechStatus.title = "本地语音识别已就绪";
+        }
+        updateLocalServerBox();
+        updateMobileLanBox();
+      }
       updateSegmentBadge();
+      updateMobileVoiceTip();
     });
     window.addEventListener("offline", updateSegmentBadge);
   }
@@ -143,11 +205,210 @@
     setSyncStatus(true);
   }
 
+  function isSpeechDraftActive() {
+    return !!(speechEditor?.value.trim() || speechWordListEditor?.value.trim());
+  }
+
+  function updateClientBadge() {
+    if (!clientBadgeEl) return;
+    const id = WordStore.getClientId?.() || ClientSession.getClientId();
+    clientBadgeEl.textContent = id;
+    clientBadgeEl.title = `本机编号 ${id} · 词云数据仅保存在本浏览器`;
+  }
+
+  async function probeLauncher() {
+    try {
+      const res = await fetch(`${LAUNCHER_URL}/api/status`, {
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function isLocalServerConnected() {
+    return speechMode === "server" && canUseServerSpeechHere();
+  }
+
+  async function updateLocalServerBox() {
+    if (!localServerBox) return;
+
+    if (shouldUseMobileBrowserSpeech()) {
+      localServerBox.classList.add("hidden");
+      return;
+    }
+
+    if (isLocalServerConnected()) {
+      localServerBox.classList.add("hidden");
+      btnMobileBrowserVoice?.classList.add("hidden");
+      return;
+    }
+
+    localServerBox.classList.remove("hidden");
+
+    btnStartLocalServer?.classList.remove("hidden");
+    btnMobileBrowserVoice?.classList.add("hidden");
+
+    const launcher = await probeLauncher();
+
+    if (localServerStarting) {
+      if (localServerHint) {
+        localServerHint.textContent = "正在启动本地服务，首次约需 30–60 秒（加载 Whisper 模型）…";
+      }
+      if (btnStartLocalServer) {
+        btnStartLocalServer.disabled = true;
+        btnStartLocalServer.textContent = "启动中…";
+      }
+      return;
+    }
+
+    if (btnStartLocalServer) {
+      btnStartLocalServer.disabled = false;
+    }
+
+    const openUrl = launcher?.serverUrl || detectedLocalServerUrl;
+    if (openUrl && !serverTranscribeOnCurrentPage) {
+      if (localServerHint) {
+        localServerHint.textContent = "本机服务已运行，点击进入本地词云页面即可使用语音";
+      }
+      if (btnStartLocalServer) btnStartLocalServer.textContent = "进入本地词云（启用语音）";
+      return;
+    }
+
+    if (openUrl && serverTranscribeOnCurrentPage && !canUseServerSpeechHere()) {
+      if (localServerHint) {
+        localServerHint.textContent = "请刷新页面或点击下方按钮重新连接本地语音识别";
+      }
+      if (btnStartLocalServer) btnStartLocalServer.textContent = "重新连接本地语音";
+      return;
+    }
+
+    if (launcher?.launcher) {
+      if (localServerHint) {
+        localServerHint.textContent = "点击下方按钮，即可启动本地 Whisper 语音识别";
+      }
+      if (btnStartLocalServer) btnStartLocalServer.textContent = "启动本地服务";
+      if (localServerNote) {
+        localServerNote.textContent = "首次点按钮即可；若助手未配置会引导下载安装程序（仅需一次）";
+      }
+      return;
+    }
+
+    if (localServerHint) {
+      localServerHint.textContent = "首次需配置启动助手（仅需一次），之后点按钮即可使用语音";
+    }
+    if (btnStartLocalServer) btnStartLocalServer.textContent = "首次配置并启动";
+    if (localServerNote) {
+      localServerNote.textContent = "首次点「首次配置并启动」会下载安装程序（仅需运行一次）· 之后点按钮即可使用语音";
+    }
+  }
+
+  async function updateMobileLanBox() {
+    if (!mobileLanBox || ClientSession.IS_MOBILE || !canUseServerSpeechHere()) {
+      mobileLanBox?.classList.add("hidden");
+      return;
+    }
+    try {
+      const res = await fetch("/api/host-info", { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error("no host info");
+      const data = await res.json();
+      if (!data.lanUrl) {
+        mobileLanBox.classList.add("hidden");
+        return;
+      }
+      mobileLanUrl.textContent = `手机与电脑同一 WiFi，浏览器打开：${data.lanUrl}`;
+      mobileLanBox.classList.remove("hidden");
+      if (btnCopyLanUrl) btnCopyLanUrl.dataset.url = data.lanUrl;
+    } catch (_) {
+      mobileLanBox.classList.add("hidden");
+    }
+  }
+
+  function shouldUseMobileBrowserSpeech() {
+    return ClientSession.IS_MOBILE && ClientSession.MOBILE_PREFER_BROWSER_SPEECH;
+  }
+
+  function updateMobileVoiceTip() {
+    if (!mobileVoiceTip) return;
+    const show = shouldUseMobileBrowserSpeech() && speechMode === "webspeech";
+    mobileVoiceTip.classList.toggle("hidden", !show);
+  }
+
+  function setupMobileBrowserSpeech() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      speechMode = "none";
+      speechStatus.textContent = "语音不可用";
+      speechStatus.title = "请换用 Chrome / Edge 手机浏览器";
+      speechStatus.classList.add("unsupported");
+      btnRecStart.disabled = true;
+      btnRecPause.disabled = true;
+      btnRecEnd.disabled = true;
+      return false;
+    }
+    speechMode = "webspeech";
+    recognition = createRecognitionInstance();
+    speechStatus.textContent = "浏览器识别";
+    speechStatus.title = "手机浏览器内置识别，无需安装";
+    speechStatus.classList.remove("unsupported");
+    btnRecStart.disabled = false;
+    btnRecPause.disabled = false;
+    btnRecEnd.disabled = false;
+    return true;
+  }
+
+  async function startLocalServerFromPanel() {
+    if (localServerStarting || shouldUseMobileBrowserSpeech()) return;
+
+    const launcher = await probeLauncher();
+    const openUrl = launcher?.serverUrl || detectedLocalServerUrl;
+
+    if (openUrl && !serverTranscribeOnCurrentPage) {
+      window.location.href = openUrl;
+      return;
+    }
+
+    if (!launcher?.launcher) {
+      downloadInstallHelper();
+      showToast("已下载「安装本地服务.bat」，请运行它（仅需一次），本页将自动检测并跳转");
+      if (localServerHint) {
+        localServerHint.textContent = "请运行刚下载的安装程序… 完成后将自动跳转到本地词云";
+      }
+      startLocalServerPoll((url) => {
+        showToast("本地服务已就绪，正在跳转…");
+        window.location.href = url;
+      });
+      return;
+    }
+
+    localServerStarting = true;
+    await updateLocalServerBox();
+
+    try {
+      const res = await fetch(`${LAUNCHER_URL}/api/start`, {
+        method: "POST",
+        signal: AbortSignal.timeout(120000),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok || !data.serverUrl) {
+        throw new Error(data.error || "启动失败");
+      }
+
+      showToast(data.alreadyRunning ? "本地服务已在运行，正在跳转…" : "本地服务已启动，正在跳转…");
+      window.location.href = data.serverUrl;
+    } catch (err) {
+      showToast(err.message || "启动失败，请运行 web\\安装本地服务.bat");
+      localServerStarting = false;
+      await updateLocalServerBox();
+    }
+  }
+
   function onRemoteUpdate() {
     refreshChart(false);
     updateStats();
-    updateSourceTabs();
-    if (WordStore.getDisplaySource() === "manual") syncWordListFromStore();
+    updateSourceTabsUI();
     emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
     btnDownload.disabled = WordStore.isEmpty();
     applyBackground();
@@ -155,12 +416,38 @@
     updateShapeOutlineGuide();
   }
 
-  function updateSourceTabs() {
+  function syncPanelWordLists(source) {
+    if (source === "voice" && !isSpeechDraftActive() && recorderState === "idle") {
+      syncSpeechWordListFromStore();
+    } else if (source === "manual") {
+      syncWordListFromStore();
+    }
+  }
+
+  function updatePanelSections() {
+    const src = WordStore.getDisplaySource();
+    panelSourceSections.forEach((section) => {
+      const sectionSource = section.dataset.panelSource;
+      const visible = src === "all" || src === sectionSource;
+      section.classList.toggle("panel-hidden", !visible);
+      section.setAttribute("aria-hidden", visible ? "false" : "true");
+    });
+    if (controlPanel) {
+      controlPanel.dataset.panelMode = src;
+    }
+  }
+
+  function updateSourceTabsUI() {
     if (!sourceTabs) return;
     const src = WordStore.getDisplaySource();
     sourceTabs.querySelectorAll(".source-tab").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.source === src);
     });
+    updatePanelSections();
+  }
+
+  function updateSourceTabs() {
+    updateSourceTabsUI();
   }
 
   function buildShapeStrip() {
@@ -235,42 +522,66 @@
     return tokens.join(" ");
   }
 
-  function syncWordListFromStore() {
-    if (!wordListEditor) return;
-    const list = WordStore.getFullListForSource("manual");
-    wordListEditor.value = list.length > 0 ? listToEditorText(list) : "";
+  function syncWordListEditor(editor, source) {
+    if (!editor) return;
+    const list = WordStore.getFullListForSource(source);
+    editor.value = list.length > 0 ? listToEditorText(list) : "";
   }
 
-  async function extractToWordList() {
-    const text = wordInput?.value.trim();
+  function syncWordListFromStore() {
+    syncWordListEditor(wordListEditor, "manual");
+  }
+
+  function syncSpeechWordListFromStore() {
+    syncWordListEditor(speechWordListEditor, "voice");
+  }
+
+  async function extractWordsToEditor(textEl, editorEl, emptyMsg, silent) {
+    const text = textEl?.value.trim();
     if (!text) {
-      showToast("请先在上方输入文本");
+      showToast(emptyMsg);
       return;
     }
     const words = await Segmenter.extractWordsAsync(text);
-    if (wordListEditor) wordListEditor.value = wordsToEditorText(words);
+    if (editorEl) editorEl.value = wordsToEditorText(words);
     updateSegmentBadge();
-    showToast(`已提取 ${words.length} 个词，可在下方编辑后提交`);
+    if (!silent) showToast(`已提取 ${words.length} 个词，可在下方编辑后提交`);
     return words;
   }
 
-  async function submitWordList() {
-    if (!wordListEditor) return;
-    const words = parseWordsFromEditor(wordListEditor.value);
+  async function extractToWordList() {
+    return extractWordsToEditor(wordInput, wordListEditor, "请先在上方输入文本");
+  }
+
+  async function extractSpeechToWordList(silent) {
+    const words = await extractWordsToEditor(
+      speechEditor,
+      speechWordListEditor,
+      "请先在识别结果中输入或录入内容",
+    );
+    if (!silent && words?.length) {
+      showToast(`已提取 ${words.length} 个词，可在下方编辑后提交`);
+    }
+    return words;
+  }
+
+  async function submitWordListForSource(editor, source, sourceLabel) {
+    if (!editor) return;
+    const words = parseWordsFromEditor(editor.value);
     if (words.length === 0) {
       showToast("词汇列表为空，请先提取或输入词汇");
       return;
     }
-    WordStore.setDisplaySource("manual");
+    WordStore.setDisplaySource(source);
     updateSourceTabs();
-    const result = WordStore.replaceWords(words, "manual");
+    const result = WordStore.replaceWords(words, source);
     if (result.added > 0) {
       await refreshChart(true);
       updateStats();
       updateSegmentBadge();
       emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
       btnDownload.disabled = false;
-      showToast(`已提交 ${result.added} 个词到词云${result.blocked.length ? `，拦截 ${result.blocked.length} 个敏感词` : ""}`);
+      showToast(`已提交 ${result.added} 个词到${sourceLabel}词云${result.blocked.length ? `，拦截 ${result.blocked.length} 个敏感词` : ""}`);
     } else if (result.blocked.length) {
       showToast(`含敏感词已拦截：${result.blocked.join("、")}`);
     } else {
@@ -278,8 +589,16 @@
     }
   }
 
-  async function copyWordList() {
-    const text = wordListEditor?.value.trim();
+  async function submitWordList() {
+    return submitWordListForSource(wordListEditor, "manual", "手动");
+  }
+
+  async function submitSpeechWordList() {
+    return submitWordListForSource(speechWordListEditor, "voice", "语音");
+  }
+
+  async function copyWordListFromEditor(editor) {
+    const text = editor?.value.trim();
     if (!text) {
       showToast("暂无词汇可复制");
       return;
@@ -288,24 +607,34 @@
       await navigator.clipboard.writeText(text);
       showToast("词汇已复制到剪贴板");
     } catch (_) {
-      wordListEditor.select();
+      editor.select();
       document.execCommand("copy");
       showToast("词汇已复制");
     }
   }
 
-  async function resegmentManual() {
-    const text = wordInput?.value.trim();
+  async function copyWordList() {
+    return copyWordListFromEditor(wordListEditor);
+  }
+
+  async function copySpeechWordList() {
+    return copyWordListFromEditor(speechWordListEditor);
+  }
+
+  async function resegmentFromSource(textEl, editorEl, emptyMsg, source, sourceLabel) {
+    const text = textEl?.value.trim();
     if (!text) {
-      showToast("请先在文本框中输入内容");
+      showToast(emptyMsg);
       return;
     }
-    const words = await extractToWordList();
+    const words = source === "voice"
+      ? await extractSpeechToWordList()
+      : await extractToWordList();
     if (!words?.length) return;
-    WordStore.setDisplaySource("manual");
+    WordStore.setDisplaySource(source);
     updateSourceTabs();
     WordStore.clearDisplay();
-    const result = WordStore.replaceWords(words, "manual");
+    const result = WordStore.replaceWords(words, source);
     const engine = Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典";
     if (result.added > 0) {
       await refreshChart(true);
@@ -313,9 +642,48 @@
       updateSegmentBadge();
       emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
       btnDownload.disabled = false;
-      showToast(`已重新分词（${engine}），共 ${result.added} 个词`);
+      showToast(`已重新分词${sourceLabel}（${engine}），共 ${result.added} 个词`);
     } else {
       showToast("重新分词未得到有效词汇");
+    }
+  }
+
+  async function resegmentManual() {
+    return resegmentFromSource(wordInput, wordListEditor, "请先在文本框中输入内容", "manual", "");
+  }
+
+  async function resegmentSpeech() {
+    return resegmentFromSource(speechEditor, speechWordListEditor, "请先在识别结果中输入或录入内容", "voice", "语音");
+  }
+
+  async function appendFromSource(textEl, editorEl, source, sourceLabel) {
+    const text = textEl?.value.trim();
+    if (!text) {
+      showToast(source === "voice" ? "请先输入或说出内容" : "请先输入文本");
+      return;
+    }
+    const words = await Segmenter.extractWordsAsync(text);
+    if (words.length === 0) {
+      showToast("未识别到有效词汇");
+      return;
+    }
+    if (editorEl) {
+      const existing = parseWordsFromEditor(editorEl.value);
+      editorEl.value = wordsToEditorText(existing.concat(words));
+    }
+    WordStore.setDisplaySource(source);
+    updateSourceTabs();
+    const result = WordStore.addWords(words, source);
+    if (result.added > 0) {
+      await refreshChart(true);
+      updateStats();
+      updateSegmentBadge();
+      emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
+      btnDownload.disabled = false;
+      const engine = Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典";
+      showToast(`已追加 ${result.added} 个词到${sourceLabel}（${engine}）${result.blocked.length ? `，拦截 ${result.blocked.length} 个` : ""}`);
+    } else if (result.blocked.length) {
+      showToast(`含敏感词已拦截：${result.blocked.join("、")}`);
     }
   }
 
@@ -331,6 +699,7 @@
   async function initManualInput() {
     if (wordInput) wordInput.value = "";
     if (wordListEditor) wordListEditor.value = "";
+    if (speechWordListEditor) speechWordListEditor.value = "";
   }
 
   async function loadDemoSample() {
@@ -347,25 +716,33 @@
   }
 
   function bindEvents() {
-    btnRecStart?.addEventListener("click", () => {
-      if (recorderState === "paused") resumeRecording();
-      else if (recorderState === "idle") startRecording();
+    btnRecStart?.addEventListener("click", async () => {
+      if (recorderState === "paused") await resumeRecording();
+      else if (recorderState === "idle") await startRecording();
     });
     btnRecPause?.addEventListener("click", pauseRecording);
     btnRecEnd?.addEventListener("click", endRecording);
-
-    audioUpload?.addEventListener("change", (e) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (file) transcribeAudioFile(file);
+    btnStartLocalServer?.addEventListener("click", startLocalServerFromPanel);
+    btnMobileBrowserVoice?.addEventListener("click", () => {
+      setupMobileBrowserSpeech();
+      updateMobileVoiceTip();
+      showToast("已启用浏览器识别，请点击「开始录音」");
+    });
+    btnCopyLanUrl?.addEventListener("click", () => {
+      const url = btnCopyLanUrl.dataset.url;
+      if (!url) return;
+      navigator.clipboard?.writeText(url).then(
+        () => showToast("已复制，请在手机浏览器粘贴打开"),
+        () => showToast(url),
+      );
     });
 
     sourceTabs?.addEventListener("click", (e) => {
       const btn = e.target.closest(".source-tab");
       if (!btn) return;
       WordStore.setDisplaySource(btn.dataset.source);
-      updateSourceTabs();
-      if (btn.dataset.source === "manual") syncWordListFromStore();
+      updateSourceTabsUI();
+      syncPanelWordLists(btn.dataset.source);
       refreshChart(true);
       updateStats();
       emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
@@ -384,9 +761,14 @@
       showToast(`已清空${label}词云`);
     });
 
-    btnSubmitSpeech.addEventListener("click", submitSpeechEditor);
-    btnClearSpeech.addEventListener("click", () => {
+    document.getElementById("btn-speech-append")?.addEventListener("click", submitSpeechAppend);
+    document.getElementById("btn-speech-resegment")?.addEventListener("click", resegmentSpeech);
+    document.getElementById("btn-speech-extract-words")?.addEventListener("click", extractSpeechToWordList);
+    document.getElementById("btn-speech-copy-words")?.addEventListener("click", copySpeechWordList);
+    document.getElementById("btn-speech-submit-words")?.addEventListener("click", submitSpeechWordList);
+    btnClearSpeech?.addEventListener("click", () => {
       speechEditor.value = "";
+      if (speechWordListEditor) speechWordListEditor.value = "";
       interimText.textContent = "";
       resetSpeechSession();
     });
@@ -410,15 +792,47 @@
         submitWordList();
       }
     });
+    speechEditor?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        extractSpeechToWordList();
+      }
+    });
+    speechWordListEditor?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        submitSpeechWordList();
+      }
+    });
     btnDownload.addEventListener("click", downloadWordCloudImage);
 
     btnReset.addEventListener("click", () => {
       if (!confirm("确定清空所有词云数据（语音 + 手动）？")) return;
       WordStore.clearAll();
       speechEditor.value = "";
+      if (speechWordListEditor) speechWordListEditor.value = "";
       resetSpeechSession();
       refreshAll();
       showToast("全部词云已清空");
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        if (recorderState === "recording") {
+          commitInstanceTranscript();
+          paintSpeechEditor();
+        }
+        return;
+      }
+      if (recorderState === "recording") {
+        scheduleRecognitionRestart(250);
+      }
+    });
+
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted && recorderState === "recording") {
+        scheduleRecognitionRestart(350);
+      }
     });
 
     btnExport.addEventListener("click", exportData);
@@ -463,191 +877,561 @@
     reader.readAsDataURL(file);
   }
 
-  async function ensureMicrophone() {
-    if (micGranted) return true;
-    if (!navigator.mediaDevices?.getUserMedia) {
-      showToast("当前浏览器不支持麦克风");
-      return false;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      micGranted = true;
-      return true;
-    } catch (_) {
-      showToast("请允许浏览器使用麦克风权限");
-      return false;
-    }
+  function getLiveTranscript() {
+    return holdAnchor + sessionCommitted + instanceFinal + holdInterim;
   }
 
-  async function prewarmMicrophone() {
-    if (micGranted || micPreparing) return;
-    micPreparing = true;
-    await ensureMicrophone();
-    micPreparing = false;
+  function commitInstanceTranscript() {
+    sessionCommitted += instanceFinal + holdInterim;
+    instanceFinal = "";
+    holdInterim = "";
   }
 
   function resetSpeechSession() {
     holdAnchor = "";
     sessionCommitted = "";
-    holdFinal = "";
+    instanceFinal = "";
     holdInterim = "";
+    lastSpeechResultAt = 0;
+  }
+
+  function paintSpeechEditor() {
+    if (!speechEditor) return;
+    const text = getLiveTranscript();
+    if (speechEditor.value !== text) {
+      speechEditor.value = text;
+    }
+    speechEditor.classList.toggle("is-recording", recorderState === "recording");
+    interimText?.classList.toggle("is-live", recorderState === "recording" && !!holdInterim);
+    speechEditor.scrollTop = speechEditor.scrollHeight;
+
+    if (holdInterim) {
+      interimText.textContent = `实时识别：${holdInterim}`;
+    } else if (recorderState === "recording") {
+      if (speechMode === "server") {
+        if (transcribeBusy) {
+          interimText.textContent = "正在识别上一段，请继续说话…";
+        } else {
+          interimText.textContent = "本地识别中，约每 2 秒更新一次识别结果";
+        }
+      } else {
+        const silentMs = lastSpeechResultAt ? Date.now() - lastSpeechResultAt : 0;
+        if (lastSpeechResultAt && silentMs > 4000) {
+          interimText.textContent = ClientSession.IS_MOBILE
+            ? "未收到识别结果，请换 Chrome/Edge，或检查麦克风与网络"
+            : "浏览器识别无响应：请运行 python web/serve.py 启用本地识别，或换用 Edge";
+        } else {
+          interimText.textContent = "正在聆听，请说话…";
+        }
+      }
+    } else if (recorderState === "paused") {
+      interimText.textContent = "已暂停，点击「继续录音」可接着录入";
+    } else if (!speechEditor.value.trim()) {
+      interimText.textContent = "";
+    } else if (recorderState === "idle") {
+      interimText.textContent = "识别完成，可编辑后提交";
+    }
+  }
+
+  function flushRecognitionToEditor() {
+    commitInstanceTranscript();
+    speechEditor.value = getLiveTranscript();
+    holdAnchor = speechEditor.value;
+    sessionCommitted = "";
+    instanceFinal = "";
+    holdInterim = "";
+  }
+
+  function startRecWatchdog() {
+    stopRecWatchdog();
+    recWatchdog = setInterval(() => {
+      if (recorderState !== "recording") return;
+      paintSpeechEditor();
+      if (speechMode === "webspeech" && !recognitionBusy && !recognitionStarting) {
+        scheduleRecognitionRestart(60);
+      }
+    }, 1500);
+  }
+
+  function stopRecWatchdog() {
+    if (recWatchdog) {
+      clearInterval(recWatchdog);
+      recWatchdog = null;
+    }
+  }
+
+  function scheduleRecognitionRestart(delay = 150) {
+    if (recorderState !== "recording") return;
+    setTimeout(() => {
+      if (recorderState === "recording" && !recognitionBusy && !recognitionStarting) {
+        tryStartRecognition();
+      }
+    }, delay);
+  }
+
+  function bindRecognitionHandlers(rec) {
+    rec.onresult = (event) => {
+      if (recorderState !== "recording") return;
+      lastSpeechResultAt = Date.now();
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0]?.transcript || "";
+        if (!text) continue;
+        if (result.isFinal) instanceFinal += text;
+        else interim += text;
+      }
+      holdInterim = interim;
+      paintSpeechEditor();
+    };
+
+    rec.onerror = (e) => {
+      const err = e.error;
+      recognitionStarting = false;
+      if (err === "no-speech") {
+        if (recorderState === "recording") scheduleRecognitionRestart(300);
+        return;
+      }
+      if (err === "aborted") return;
+      if (err === "not-allowed") {
+        showToast("麦克风权限被拒绝，请在浏览器设置中允许");
+        endRecording(true);
+        return;
+      }
+      if (err === "network") {
+        interimText.textContent = "网络异常：Chrome 语音识别需访问 Google 服务，请检查网络或换用 Edge";
+        scheduleRecognitionRestart(800);
+        return;
+      }
+      if (err === "service-not-allowed") {
+        showToast("当前页面无法使用麦克风，请用 HTTPS 或 localhost 打开");
+        endRecording(true);
+        return;
+      }
+      if (recorderState === "recording") scheduleRecognitionRestart(500);
+    };
+
+    rec.onend = () => {
+      recognitionBusy = false;
+      recognitionStarting = false;
+      if (recorderState !== "recording") return;
+      commitInstanceTranscript();
+      paintSpeechEditor();
+      scheduleRecognitionRestart(ClientSession.IS_MOBILE ? 300 : 120);
+    };
+
+    rec.onstart = () => {
+      recognitionBusy = true;
+      recognitionStarting = false;
+      restartAttempts = 0;
+      lastSpeechResultAt = Date.now();
+      speechStatus.textContent = "聆听中…";
+      speechStatus.classList.add("listening");
+      interimText.textContent = "正在聆听，请说话…";
+    };
+
+    rec.onspeechstart = () => {
+      lastSpeechResultAt = Date.now();
+      interimText.textContent = "已检测到语音…";
+    };
+
+    rec.onsoundstart = () => {
+      if (recorderState === "recording" && !holdInterim) {
+        interimText.textContent = "正在接收声音…";
+      }
+    };
+  }
+
+  function createRecognitionInstance() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const rec = new SR();
+    rec.lang = "zh-CN";
+    rec.continuous = !ClientSession.IS_MOBILE;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    bindRecognitionHandlers(rec);
+    return rec;
+  }
+
+  function stopRecognitionEngine() {
+    recognitionBusy = false;
+    recognitionStarting = false;
+    if (!recognition) return;
+    try {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.onstart = null;
+    } catch (_) { /* ignore */ }
+    try {
+      recognition.abort();
+    } catch (_) {
+      try { recognition.stop(); } catch (_2) { /* ignore */ }
+    }
+  }
+
+  function recreateRecognition() {
+    stopRecognitionEngine();
+    recognition = createRecognitionInstance();
   }
 
   function updateRecordingUI() {
     const recording = recorderState === "recording";
     const paused = recorderState === "paused";
-    const busy = recorderState === "transcribing";
     const active = recording || paused;
 
     btnRecStart?.classList.toggle("recording", recording);
-    btnRecStart.disabled = busy || recording;
-    if (btnRecStart && !busy) {
+    btnRecStart.disabled = recording;
+    if (btnRecStart) {
       btnRecStart.textContent = paused ? "继续录音" : "开始录音";
     }
-    btnRecPause.disabled = busy || !recording;
-    btnRecEnd.disabled = busy || !active;
-    document.getElementById("rec-controls")?.classList.toggle("is-busy", busy);
+    btnRecPause.disabled = !recording;
+    btnRecEnd.disabled = !active;
     document.getElementById("rec-controls")?.classList.toggle("is-session-active", active);
   }
 
-  function flushRecognitionToEditor() {
-    speechEditor.value = holdAnchor + sessionCommitted + holdFinal + holdInterim;
-    holdAnchor = speechEditor.value;
-    sessionCommitted = "";
-    holdFinal = "";
-    holdInterim = "";
+  function isOnLocalKioskOrigin() {
+    return LOCAL_HOSTS.has(window.location.hostname);
   }
 
-  function appendToSpeechEditor(text) {
-    const t = (text || "").trim();
-    if (!t) return;
-    const cur = speechEditor.value.trim();
-    speechEditor.value = cur ? `${cur}\n${t}` : t;
-    speechEditor.scrollTop = speechEditor.scrollHeight;
+  function getLocalServerUrlFromPort(port) {
+    return port ? `http://127.0.0.1:${port}/` : null;
   }
 
-  function updateSpeechEditorDisplay() {
-    speechEditor.value = holdAnchor + sessionCommitted + holdFinal + holdInterim;
-    speechEditor.scrollTop = speechEditor.scrollHeight;
-    if (holdInterim) {
-      interimText.textContent = `实时识别：${holdInterim}`;
-    } else if (recorderState === "recording") {
-      interimText.textContent = "正在聆听，请说话…";
-    } else if (recorderState === "paused") {
-      interimText.textContent = "已暂停，点击「继续录音」可接着录入";
-    } else if (recorderState === "transcribing") {
-      interimText.textContent = "正在识别上传的录音…";
-    } else if (!speechEditor.value) {
-      interimText.textContent = "";
+  async function scanLocalServerPorts() {
+    for (const port of [8765, 8766, 8767, 8080]) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/transcribe/health`, {
+          signal: AbortSignal.timeout(2000),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.available) {
+          return { port, url: getLocalServerUrlFromPort(port) };
+        }
+      } catch (_) { /* try next */ }
     }
+    return null;
   }
 
-  function initSpeech() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      speechStatus.textContent = "语音不可用";
-      speechStatus.classList.add("unsupported");
-      btnRecStart.disabled = true;
-      btnRecPause.disabled = true;
-      btnRecEnd.disabled = true;
-      return;
-    }
-    updateRecordingUI();
+  async function probeServerTranscribe() {
+    detectedLocalServerUrl = null;
+    serverTranscribeOnCurrentPage = false;
 
-    recognition = new SR();
-    recognition.lang = "zh-CN";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event) => {
-      let finalPart = "";
-      let interimPart = "";
-      for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i];
-        const text = result[0]?.transcript || "";
-        if (!text) continue;
-        if (result.isFinal) finalPart += text;
-        else interimPart += text;
+    try {
+      const res = await fetch("/api/transcribe/health", {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.available) {
+          serverTranscribeOk = true;
+          serverTranscribeOnCurrentPage = true;
+          detectedLocalServerUrl = `${window.location.origin}/`;
+          return true;
+        }
       }
-      holdFinal = finalPart;
-      holdInterim = interimPart;
-      updateSpeechEditorDisplay();
-    };
+    } catch (_) { /* 当前页不是本地服务 */ }
 
-    recognition.onerror = (e) => {
-      const err = e.error;
-      if (err === "no-speech") {
-        if (recorderState === "recording") interimText.textContent = "未检测到语音，请继续说话…";
+    if (!ClientSession.IS_MOBILE) {
+      const found = await scanLocalServerPorts();
+      if (found) {
+        serverTranscribeOk = true;
+        detectedLocalServerUrl = found.url;
+        return true;
+      }
+    }
+
+    serverTranscribeOk = false;
+    return false;
+  }
+
+  function canUseServerSpeechHere() {
+    return serverTranscribeOnCurrentPage;
+  }
+
+  function downloadInstallHelper() {
+    const batUrl = new URL("安装本地服务.bat", window.location.href).href;
+    const a = document.createElement("a");
+    a.href = batUrl;
+    a.download = "安装本地服务.bat";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function stopLocalServerPoll() {
+    if (localServerPollTimer) {
+      clearInterval(localServerPollTimer);
+      localServerPollTimer = null;
+    }
+  }
+
+  function startLocalServerPoll(onReady) {
+    stopLocalServerPoll();
+    let tries = 0;
+    localServerPollTimer = setInterval(async () => {
+      tries += 1;
+      const launcher = await probeLauncher();
+      if (launcher?.serverRunning && launcher.serverUrl) {
+        stopLocalServerPoll();
+        onReady(launcher.serverUrl);
         return;
       }
-      if (err === "aborted") return;
-      if (err === "not-allowed") {
-        micGranted = false;
-        showToast("麦克风权限被拒绝，请在浏览器设置中允许");
-      } else if (err !== "network") {
-        showToast(`语音识别异常：${err}`);
+      if (tries >= 90) stopLocalServerPoll();
+    }, 2000);
+  }
+
+  function pickRecorderMimeType() {
+    const types = ClientSession.IS_MOBILE
+      ? ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"]
+      : ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+    for (const t of types) {
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    }
+    return "";
+  }
+
+  function enqueueTranscribeChunk(blob) {
+    if (!blob || blob.size < 128) return;
+    transcribeQueue.push(blob);
+    drainTranscribeQueue();
+  }
+
+  async function transcribeChunk(blob) {
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": blob.type || "audio/webm" },
+      body: blob,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `识别失败 (${res.status})`);
+    }
+    return (data.text || "").trim();
+  }
+
+  async function drainTranscribeQueue() {
+    if (transcribeBusy || transcribeQueue.length === 0) return;
+    if (recorderState !== "recording" && recorderState !== "paused") return;
+
+    transcribeBusy = true;
+    const blob = transcribeQueue.shift();
+    holdInterim = firstServerTranscribe
+      ? "首次识别正在加载模型，约需 10–30 秒…"
+      : "正在识别…";
+    paintSpeechEditor();
+
+    try {
+      const text = await transcribeChunk(blob);
+      if (text && (recorderState === "recording" || recorderState === "paused")) {
+        sessionCommitted += text;
+        lastSpeechResultAt = Date.now();
+        firstServerTranscribe = false;
       }
-      if (recorderState === "recording") endRecording(false);
-    };
-
-    recognition.onend = () => {
-      recognitionBusy = false;
-      if (recorderState !== "recording") return;
-
-      const current = speechEditor.value.slice(holdAnchor.length);
-      sessionCommitted = current;
-      holdFinal = "";
+    } catch (err) {
+      console.warn("本地语音识别失败", err);
+      if (recorderState === "recording") {
+        interimText.textContent = `识别出错：${err.message || err}`;
+      }
+    } finally {
       holdInterim = "";
+      transcribeBusy = false;
+      paintSpeechEditor();
+      if (transcribeQueue.length > 0) drainTranscribeQueue();
+    }
+  }
 
-      setTimeout(() => {
-        if (recorderState !== "recording" || recognitionBusy) return;
-        try {
-          recognition.start();
-          recognitionBusy = true;
-        } catch (_) {
-          endRecording(false);
-        }
-      }, 100);
-    };
+  async function waitTranscribeQueueIdle(maxMs = 12000) {
+    const start = Date.now();
+    while ((transcribeBusy || transcribeQueue.length > 0) && Date.now() - start < maxMs) {
+      await new Promise((r) => setTimeout(r, 120));
+      if (!transcribeBusy && transcribeQueue.length > 0) drainTranscribeQueue();
+    }
+  }
 
-    recognition.onstart = () => {
-      recognitionBusy = true;
-      speechStatus.textContent = "聆听中…";
-      speechStatus.classList.add("listening");
+  function stopMediaCapture() {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      try { mediaRecorder.stop(); } catch (_) { /* ignore */ }
+    }
+    mediaRecorder = null;
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+    }
+  }
+
+  async function startServerRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("当前浏览器不支持麦克风");
+      recorderState = "idle";
+      updateRecordingUI();
+      return;
+    }
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (_) {
+      showToast("请允许浏览器使用麦克风");
+      recorderState = "idle";
+      updateRecordingUI();
+      return;
+    }
+
+    const mimeType = pickRecorderMimeType();
+    try {
+      mediaRecorder = mimeType
+        ? new MediaRecorder(mediaStream, { mimeType })
+        : new MediaRecorder(mediaStream);
+    } catch (_) {
+      showToast("无法启动录音");
+      stopMediaCapture();
+      recorderState = "idle";
+      updateRecordingUI();
+      return;
+    }
+
+    transcribeQueue = [];
+    transcribeBusy = false;
+    lastSpeechResultAt = Date.now();
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data?.size) enqueueTranscribeChunk(e.data);
     };
+    mediaRecorder.onerror = () => showToast("录音异常，请重试");
+
+    mediaRecorder.start(TRANSCRIBE_SLICE_MS);
+    startRecWatchdog();
+    interimText.textContent = "本地识别中，请说话…";
+    paintSpeechEditor();
+  }
+
+  async function initSpeech() {
+    if (shouldUseMobileBrowserSpeech()) {
+      setupMobileBrowserSpeech();
+      updateRecordingUI();
+      updateLocalServerBox();
+      updateMobileVoiceTip();
+      return;
+    }
+
+    await probeServerTranscribe();
+
+    if (canUseServerSpeechHere()) {
+      speechMode = "server";
+      speechStatus.textContent = "本地 Whisper";
+      speechStatus.title = "本地语音识别已就绪，不依赖 Google";
+      speechStatus.classList.remove("unsupported");
+      btnRecStart.disabled = false;
+      btnRecPause.disabled = false;
+      btnRecEnd.disabled = false;
+      updateRecordingUI();
+      updateLocalServerBox();
+      updateMobileLanBox();
+      updateMobileVoiceTip();
+      return;
+    }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      speechMode = "webspeech";
+      recognition = createRecognitionInstance();
+      speechStatus.textContent = "就绪";
+      speechStatus.classList.remove("unsupported");
+      btnRecStart.disabled = false;
+      updateRecordingUI();
+      updateLocalServerBox();
+      updateMobileVoiceTip();
+      return;
+    }
+
+    speechMode = "none";
+    speechStatus.textContent = "语音不可用";
+    speechStatus.classList.add("unsupported");
+    btnRecStart.disabled = true;
+    btnRecPause.disabled = true;
+    btnRecEnd.disabled = true;
+    updateLocalServerBox();
+    updateMobileVoiceTip();
   }
 
   function tryStartRecognition() {
+    if (!recognition || recorderState !== "recording") return;
+    if (recognitionBusy || recognitionStarting) return;
+
+    recognitionStarting = true;
     try {
       recognition.start();
-      recognitionBusy = true;
     } catch (err) {
+      recognitionStarting = false;
       if (err.name === "InvalidStateError") {
         try { recognition.stop(); } catch (_) { /* ignore */ }
-        setTimeout(() => {
-          if (recorderState !== "recording") return;
-          try {
-            recognition.start();
-            recognitionBusy = true;
-          } catch (_) {
-            endRecording(false);
-          }
-        }, 150);
-      } else {
-        showToast("无法启动语音识别");
-        endRecording(false);
+        scheduleRecognitionRestart(200);
+        return;
       }
+      restartAttempts += 1;
+      if (restartAttempts >= MAX_REC_RESTART) {
+        showToast("语音识别启动失败，请点「结束录音」后重试");
+        return;
+      }
+      recreateRecognition();
+      scheduleRecognitionRestart(400);
     }
+  }
+
+  async function beginRecordingSession() {
+    holdAnchor = speechEditor?.value || "";
+    if (holdAnchor.trim() && !holdAnchor.endsWith("\n")) holdAnchor += "\n";
+    sessionCommitted = "";
+    instanceFinal = "";
+    holdInterim = "";
+    lastSpeechResultAt = 0;
+    restartAttempts = 0;
+
+    recorderState = "recording";
+    updateRecordingUI();
+    interimText.textContent = speechMode === "server" ? "正在启动本地识别…" : "正在启动麦克风…";
+    speechStatus.textContent = "录音中";
+    speechStatus.classList.add("listening");
+    paintSpeechEditor();
+    speechEditor?.focus();
+    if (!ClientSession.IS_MOBILE) {
+      speechEditor?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    if (speechMode === "server") {
+      await startServerRecording();
+      return;
+    }
+
+    if (!recognition) recreateRecognition();
+    startRecWatchdog();
+    tryStartRecognition();
   }
 
   async function startRecording() {
-    if (!recognition || recorderState === "recording" || recorderState === "transcribing") return;
+    if (recorderState === "recording") return;
 
-    if (!micGranted) {
-      const ok = await ensureMicrophone();
-      if (!ok) return;
+    if (speechMode === "none") {
+      await probeServerTranscribe();
+      if (serverTranscribeOk) speechMode = "server";
+      else if (!recognition) recreateRecognition();
+      if (speechMode === "none" && !recognition) {
+        showToast("语音识别不可用，请运行 python web/serve.py");
+        return;
+      }
+    }
+
+    if (speechMode === "webspeech" && !recognition) {
+      recreateRecognition();
+      if (!recognition) {
+        showToast("当前浏览器不支持语音输入");
+        return;
+      }
     }
 
     if (stopTimer) {
@@ -655,227 +1439,86 @@
       stopTimer = null;
     }
 
-    holdAnchor = speechEditor.value;
-    if (holdAnchor.trim() && !holdAnchor.endsWith("\n")) holdAnchor += "\n";
-    sessionCommitted = "";
-    holdFinal = "";
-    holdInterim = "";
-
-    recorderState = "recording";
-    updateRecordingUI();
-    interimText.textContent = "正在聆听，请说话…";
-    speechStatus.textContent = "录音中";
-    speechStatus.classList.add("listening");
-
-    tryStartRecognition();
+    WordStore.setDisplaySource("voice");
+    updateSourceTabs();
+    await beginRecordingSession();
   }
 
-  function resumeRecording() {
-    if (!recognition || recorderState !== "paused") return;
-    recorderState = "recording";
-    holdFinal = "";
-    holdInterim = "";
-    updateRecordingUI();
-    interimText.textContent = "正在聆听，请说话…";
-    speechStatus.textContent = "录音中";
-    speechStatus.classList.add("listening");
-    tryStartRecognition();
+  async function resumeRecording() {
+    if (recorderState !== "paused") return;
+    if (speechMode === "webspeech" && !recognition) return;
+
+    if (stopTimer) {
+      clearTimeout(stopTimer);
+      stopTimer = null;
+    }
+
+    await beginRecordingSession();
   }
 
-  function pauseRecording() {
-    if (!recognition || recorderState !== "recording") return;
+  async function pauseRecording() {
+    if (recorderState !== "recording") return;
 
     recorderState = "paused";
+    stopRecWatchdog();
     if (stopTimer) {
       clearTimeout(stopTimer);
       stopTimer = null;
     }
 
-    try {
-      recognition.stop();
-    } catch (_) { /* ignore */ }
+    if (speechMode === "server") {
+      stopMediaCapture();
+      await waitTranscribeQueueIdle();
+      commitInstanceTranscript();
+    } else {
+      commitInstanceTranscript();
+      stopRecognitionEngine();
+    }
 
-    setTimeout(() => {
-      flushRecognitionToEditor();
-      updateRecordingUI();
-      speechStatus.textContent = "已暂停";
-      speechStatus.classList.remove("listening");
-      interimText.textContent = "已暂停，点击「继续录音」可接着录入";
-    }, 320);
+    flushRecognitionToEditor();
+    paintSpeechEditor();
+    updateRecordingUI();
+    speechStatus.textContent = "已暂停";
+    speechStatus.classList.remove("listening");
+    interimText.textContent = "已暂停，点击「继续录音」可接着录入";
   }
 
-  function endRecording(flush = true) {
-    if (!recognition) return;
+  async function endRecording(flush = true) {
     if (recorderState !== "recording" && recorderState !== "paused") return;
 
     recorderState = "idle";
+    stopRecWatchdog();
     updateRecordingUI();
-    speechStatus.textContent = "就绪";
+    speechStatus.textContent = speechMode === "server" ? "本地识别就绪" : "就绪";
     speechStatus.classList.remove("listening");
 
     if (stopTimer) clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => {
-      stopTimer = null;
-      if (flush) flushRecognitionToEditor();
-      interimText.textContent = speechEditor.value.trim()
-        ? "识别完成，可编辑后提交"
-        : "";
-      try {
-        recognition.stop();
-      } catch (_) { /* ignore */ }
-    }, 380);
-  }
+    stopTimer = null;
 
-  async function tryServerTranscribe(file) {
-    if (!SyncHub.isServerMode()) return null;
-    try {
-      const fd = new FormData();
-      fd.append("audio", file, file.name || "audio.wav");
-      const res = await fetch("/api/transcribe", { method: "POST", body: fd });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return (data.text || "").trim() || null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async function transcribeAudioByPlayback(file) {
-    if (!recognition) {
-      showToast("当前浏览器不支持语音识别");
-      return;
-    }
-    const ok = await ensureMicrophone();
-    if (!ok) return;
-
-    holdAnchor = speechEditor.value;
-    if (holdAnchor.trim() && !holdAnchor.endsWith("\n")) holdAnchor += "\n";
-    sessionCommitted = "";
-    holdFinal = "";
-    holdInterim = "";
-
-    const url = URL.createObjectURL(file);
-    playbackAudio = new Audio(url);
-
-    return new Promise((resolve) => {
-      const cleanup = () => {
-        URL.revokeObjectURL(url);
-        playbackAudio = null;
-        recorderState = "idle";
-        updateRecordingUI();
-        speechStatus.textContent = "就绪";
-        speechStatus.classList.remove("listening");
-      };
-
-      const finish = (flush) => {
-        try { recognition.stop(); } catch (_) { /* ignore */ }
-        setTimeout(() => {
-          if (flush) flushRecognitionToEditor();
-          cleanup();
-          interimText.textContent = speechEditor.value.trim()
-            ? "录音文件识别完成，可编辑后提交"
-            : "未识别到有效内容，请换清晰录音重试";
-          resolve();
-        }, 450);
-      };
-
-      playbackAudio.onended = () => finish(true);
-      playbackAudio.onerror = () => {
-        showToast("无法播放该音频文件");
-        finish(false);
-      };
-
-      recorderState = "transcribing";
-      updateRecordingUI();
-      speechStatus.textContent = "识别中…";
-      interimText.textContent = "正在播放并识别录音，请稍候…";
-
-      try {
-        recognition.start();
-        recognitionBusy = true;
-      } catch (_) {
-        showToast("无法启动语音识别");
-        cleanup();
-        resolve();
-        return;
-      }
-
-      playbackAudio.play().catch(() => {
-        showToast("无法播放音频，请检查格式（推荐 wav/mp3）");
-        finish(false);
-      });
-    });
-  }
-
-  async function transcribeAudioFile(file) {
-    if (!file) return;
-    if (recorderState === "recording" || recorderState === "paused") {
-      endRecording(true);
-      await new Promise((r) => setTimeout(r, 400));
+    if (speechMode === "server") {
+      stopMediaCapture();
+      if (flush) await waitTranscribeQueueIdle();
+    } else if (recognition) {
+      stopRecognitionEngine();
+      recreateRecognition();
     }
 
-    recorderState = "transcribing";
-    updateRecordingUI();
-    speechStatus.textContent = "识别中…";
-    interimText.textContent = "正在识别上传的录音…";
-
-    let text = await tryServerTranscribe(file);
-    if (!text) {
-      await transcribeAudioByPlayback(file);
-      if (speechEditor.value.trim()) {
-        showToast("录音已识别到文字");
-      }
-      return;
-    }
-
-    appendToSpeechEditor(text);
-    recorderState = "idle";
-    updateRecordingUI();
-    speechStatus.textContent = "就绪";
-    interimText.textContent = "录音识别完成，可编辑后提交";
-    showToast("录音已识别到文字");
-  }
-
-  async function submitSpeechEditor() {
-    const text = speechEditor.value.trim();
-    if (!text) { showToast("请先输入或说出内容"); return; }
-    const result = await ingestText(text, "voice");
-    if (result.added > 0) {
-      speechEditor.value = "";
-      resetSpeechSession();
-      showToast(`已提交 ${result.added} 个词到语音词云${result.blocked.length ? `，拦截 ${result.blocked.length} 个敏感词` : ""}`);
-    } else if (result.blocked.length) {
-      showToast(`内容含敏感词已被拦截：${result.blocked.join("、")}`);
+    if (flush) {
+      commitInstanceTranscript();
+      flushRecognitionToEditor();
+      paintSpeechEditor();
     } else {
-      showToast("未识别到有效词汇");
+      instanceFinal = "";
+      holdInterim = "";
     }
+  }
+
+  async function submitSpeechAppend() {
+    return appendFromSource(speechEditor, speechWordListEditor, "voice", "语音");
   }
 
   async function submitManualInput() {
-    const text = wordInput.value.trim();
-    if (!text) return;
-    const words = await Segmenter.extractWordsAsync(text);
-    if (words.length === 0) {
-      showToast("未识别到有效词汇");
-      return;
-    }
-    if (wordListEditor) {
-      const existing = parseWordsFromEditor(wordListEditor.value);
-      wordListEditor.value = wordsToEditorText(existing.concat(words));
-    }
-    WordStore.setDisplaySource("manual");
-    updateSourceTabs();
-    const result = WordStore.addWords(words, "manual");
-    if (result.added > 0) {
-      await refreshChart(true);
-      updateStats();
-      updateSegmentBadge();
-      emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
-      btnDownload.disabled = false;
-      showToast(`已追加 ${result.added} 个词（${Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典"}）${result.blocked.length ? `，拦截 ${result.blocked.length} 个` : ""}`);
-    } else if (result.blocked.length) {
-      showToast(`含敏感词已拦截：${result.blocked.join("、")}`);
-    }
+    return appendFromSource(wordInput, wordListEditor, "manual", "手动");
   }
 
   async function ingestText(text, source = "manual") {

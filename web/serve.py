@@ -2,25 +2,16 @@
 
 from __future__ import annotations
 
-import cgi
 import http.server
 import json
 import queue
 import socket
 import socketserver
 import sys
-import tempfile
 import threading
 import time
 import webbrowser
 from pathlib import Path
-
-try:
-    import speech_recognition as sr
-
-    HAS_SPEECH = True
-except ImportError:
-    HAS_SPEECH = False
 
 WEB_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = WEB_DIR.parent
@@ -34,20 +25,39 @@ except ImportError:
     def segment_list(text: str, stopwords=None) -> list[str]:  # type: ignore
         return []
 
+try:
+    from transcribe_lib import get_status as transcribe_status, transcribe_bytes, warm_up as transcribe_warm_up
+    HAS_TRANSCRIBE = True
+except ImportError:
+    HAS_TRANSCRIBE = False
+
+    def transcribe_status() -> dict:  # type: ignore
+        return {"available": False, "error": "transcribe_lib 未找到"}
+
+    def transcribe_bytes(data: bytes, suffix: str = ".webm") -> str:  # type: ignore
+        raise RuntimeError("语音识别模块不可用")
+
+    def transcribe_warm_up() -> None:  # type: ignore
+        pass
+
 STATE_FILE = WEB_DIR / "data" / "sync-state.json"
 DEFAULT_PORTS = (8765, 8766, 8767, 8080, 3000)
 
 DEFAULT_STATE = {
     "revision": 0,
-    "voiceFrequencies": {},
-    "manualFrequencies": {},
-    "displaySource": "voice",
     "background": "gradient-1",
     "customBgImage": None,
     "shapeMask": "circle",
     "customMaskImage": None,
     "updatedAt": "",
 }
+
+VISUAL_SYNC_KEYS = (
+    "background",
+    "customBgImage",
+    "shapeMask",
+    "customMaskImage",
+)
 
 
 class StateManager:
@@ -84,24 +94,18 @@ class StateManager:
         with self._lock:
             old_rev = self._state.get("revision", 0)
             new_rev = incoming.get("revision", 0)
-            if new_rev <= old_rev:
+            changed = False
+
+            if new_rev > old_rev:
+                for key in VISUAL_SYNC_KEYS:
+                    if key in incoming:
+                        self._state[key] = incoming[key]
+                self._state["revision"] = new_rev
+                changed = True
+
+            if not changed:
                 return dict(self._state)
 
-            sync_keys = (
-                "voiceFrequencies",
-                "manualFrequencies",
-                "displaySource",
-                "frequencies",
-                "background",
-                "customBgImage",
-                "shapeMask",
-                "customMaskImage",
-            )
-            for key in sync_keys:
-                if key in incoming:
-                    self._state[key] = incoming[key]
-
-            self._state["revision"] = new_rev
             self._state["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             snapshot = dict(self._state)
         self._persist()
@@ -130,6 +134,7 @@ class StateManager:
 
 
 STATE = StateManager()
+RUNTIME_HOST_INFO: dict = {}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -156,22 +161,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if self.path == "/api/state":
+        path = self.path.split("?", 1)[0]
+        if path == "/api/state":
             self._send_json(STATE.get())
             return
-        if self.path == "/api/segment/health":
+        if path == "/api/segment/health":
             self._send_json({
                 "available": HAS_JIEBA,
                 "engine": "jieba" if HAS_JIEBA else None,
             })
             return
-        if self.path == "/api/events":
+        if path == "/api/transcribe/health":
+            self._send_json(transcribe_status())
+            return
+        if path == "/api/host-info":
+            self._send_json(self._host_info())
+            return
+        if path == "/api/events":
             self._handle_sse()
             return
         super().do_GET()
 
     def do_POST(self) -> None:
-        if self.path == "/api/state":
+        path = self.path.split("?", 1)[0]
+        if path == "/api/state":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length else b"{}"
             try:
@@ -182,11 +195,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             snapshot = STATE.update(data)
             self._send_json(snapshot)
             return
-        if self.path == "/api/transcribe":
-            self._handle_transcribe()
-            return
-        if self.path == "/api/segment":
+        if path == "/api/segment":
             self._handle_segment()
+            return
+        if path == "/api/transcribe":
+            self._handle_transcribe()
             return
         self.send_error(404)
 
@@ -216,49 +229,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         words = segment_list(text)
         self._send_json({"words": words, "engine": "jieba"})
 
+    def _host_info(self) -> dict:
+        host_header = self.headers.get("Host", "")
+        port = host_header.split(":")[-1] if ":" in host_header else str(RUNTIME_HOST_INFO.get("port") or "")
+        lan = RUNTIME_HOST_INFO.get("lan")
+        local_port = RUNTIME_HOST_INFO.get("port") or port
+        return {
+            "localUrl": f"http://127.0.0.1:{local_port}/",
+            "lanUrl": f"http://{lan}:{local_port}/" if lan else None,
+            "port": int(local_port) if str(local_port).isdigit() else local_port,
+        }
+
     def _handle_transcribe(self) -> None:
-        if not HAS_SPEECH:
+        status = transcribe_status()
+        if not status.get("available"):
             self._send_json(
-                {"error": "server_missing_speech", "text": ""},
+                {"error": status.get("error") or "transcribe_unavailable", "text": ""},
                 status=501,
             )
             return
 
-        ctype = self.headers.get("Content-Type", "")
-        if "multipart/form-data" not in ctype:
-            self.send_error(400, "Expected multipart form")
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b""
+        if not body:
+            self._send_json({"text": "", "engine": "whisper"})
             return
 
+        content_type = (self.headers.get("Content-Type") or "audio/webm").split(";")[0].strip()
+        suffix = ".webm"
+        if "wav" in content_type:
+            suffix = ".wav"
+        elif "mp4" in content_type or "m4a" in content_type:
+            suffix = ".mp4"
+        elif "ogg" in content_type:
+            suffix = ".ogg"
+
         try:
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": ctype,
-                    "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
-                },
-            )
-            item = form["audio"] if "audio" in form else None
-            if not item or not getattr(item, "file", None):
-                self.send_error(400, "Missing audio file")
-                return
-
-            suffix = Path(getattr(item, "filename", "") or "audio.wav").suffix or ".wav"
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                tmp.write(item.file.read())
-                tmp_path = tmp.name
-
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(tmp_path) as source:
-                audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio, language="zh-CN")
-            Path(tmp_path).unlink(missing_ok=True)
-            self._send_json({"text": text})
-        except sr.UnknownValueError:
-            self._send_json({"text": "", "error": "no_speech"})
+            text = transcribe_bytes(body, suffix=suffix)
+            self._send_json({"text": text, "engine": "whisper"})
         except Exception as exc:
-            self._send_json({"text": "", "error": str(exc)}, status=500)
+            self._send_json(
+                {"error": str(exc), "text": ""},
+                status=500,
+            )
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -337,6 +350,8 @@ def main() -> None:
     base = f"http://127.0.0.1:{port}"
     lan = local_ip()
     lan_base = f"http://{lan}:{port}" if lan else None
+    RUNTIME_HOST_INFO["port"] = port
+    RUNTIME_HOST_INFO["lan"] = lan
 
     try:
         httpd = ThreadingHTTPServer(("", port), Handler)
@@ -356,6 +371,13 @@ def main() -> None:
         print("  分词引擎:       jieba（/api/segment）")
     else:
         print("  分词引擎:       未安装 jieba，请运行 pip install jieba")
+    t_status = transcribe_status()
+    if t_status.get("available"):
+        print(f"  语音识别:       whisper/{t_status.get('model', 'tiny')}（/api/transcribe）")
+        transcribe_warm_up()
+    else:
+        hint = t_status.get("error") or "未配置"
+        print(f"  语音识别:       不可用 — {hint}")
     print("  按 Ctrl+C 停止")
     print("=" * 54)
 

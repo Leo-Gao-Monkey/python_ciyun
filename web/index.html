@@ -6,10 +6,11 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta http-equiv="Permissions-Policy" content="microphone=(self)">
   <meta name="theme-color" content="#eef2f9">
   <meta name="description" content="基于 Python 的词云可视化 — 支持语音输入、手动录入与实时词云展示">
   <title>基于Python的词云可视化</title>
-  <link rel="stylesheet" href="css/kiosk.css?v=20260620">
+  <link rel="stylesheet" href="css/kiosk.css?v=20260704">
 </head>
 <body class="console-layout">
   <div id="background-layer"></div>
@@ -72,12 +73,26 @@
       <header class="panel-header">
         <h1>控制面板</h1>
         <div class="panel-header-badges">
+          <span id="client-badge" class="client-badge" title="本机编号，词云数据仅保存在本浏览器">终端</span>
           <span id="segment-engine" class="segment-badge segment-pending" title="分词引擎">分词检测中</span>
           <span id="speech-status" class="status-badge">就绪</span>
         </div>
       </header>
 
-      <section class="panel-card">
+      <div id="local-server-box" class="local-server-box hidden">
+        <p id="local-server-hint" class="local-server-hint">本地 Whisper 未连接 · 语音需启动本机服务</p>
+        <button id="btn-start-local-server" class="btn-start-local-server" type="button">启动本地服务</button>
+        <button id="btn-mobile-browser-voice" class="btn-mobile-browser-voice hidden" type="button">先用浏览器识别</button>
+        <p id="local-server-note" class="local-server-note">首次点「首次配置并启动」会下载安装程序（仅需运行一次）· 之后点按钮即可使用语音</p>
+      </div>
+
+      <div id="mobile-lan-box" class="mobile-lan-box hidden">
+        <p class="mobile-lan-title">📱 手机录音说明</p>
+        <p id="mobile-lan-url" class="mobile-lan-url"></p>
+        <button id="btn-copy-lan-url" class="btn-copy-lan-url" type="button">复制手机访问地址</button>
+      </div>
+
+      <section class="panel-card panel-source-section" data-panel-source="voice">
         <h2 class="card-title"><span class="card-icon">🎙</span> 语音输入</h2>
         <div class="rec-controls" id="rec-controls">
           <div class="rec-toolbar" role="toolbar" aria-label="录音控制">
@@ -85,21 +100,29 @@
             <button id="btn-rec-pause" class="btn-rec btn-rec-pause" type="button" disabled>暂停录音</button>
             <button id="btn-rec-end" class="btn-rec btn-rec-end" type="button" disabled>结束录音</button>
           </div>
-          <label class="rec-upload-row" for="audio-upload" title="上传音频文件并识别为文字">
-            <span class="rec-upload-icon" aria-hidden="true">📤</span> 上传录音
-          </label>
-          <input id="audio-upload" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.webm" hidden>
         </div>
         <p id="interim-text" class="interim-text"></p>
-        <label class="field-label" for="speech-editor">识别结果 <span class="label-tag">可编辑</span></label>
-        <textarea id="speech-editor" class="speech-editor" rows="3" placeholder="语音识别内容将显示在这里"></textarea>
-        <div class="speech-actions">
-          <button id="btn-submit-speech" class="btn-speech-action btn-speech-submit" type="button">提交到词云</button>
-          <button id="btn-clear-speech" class="btn-speech-action btn-speech-clear" type="button">清空</button>
+        <p id="mobile-voice-tip" class="mobile-voice-tip hidden">手机浏览器识别已就绪，直接点「开始录音」· 推荐 Chrome 或 Edge</p>
+        <label class="field-label" for="speech-editor">识别结果 <span class="label-tag">可编辑 · 实时显示</span></label>
+        <textarea id="speech-editor" class="speech-editor" rows="4" placeholder="点击「开始录音」后，识别内容将实时显示在这里" spellcheck="false"></textarea>
+        <div class="manual-btn-grid" role="toolbar" aria-label="语音识别操作">
+          <button id="btn-speech-append" class="manual-btn manual-btn-append" type="button">提取并追加</button>
+          <button id="btn-speech-resegment" class="manual-btn manual-btn-resegment" type="button">重新分词</button>
+          <button id="btn-clear-speech" class="manual-btn manual-btn-copy" type="button">清空</button>
         </div>
+        <p class="field-hint">识别文本后「提取词汇」，在下方核对修改，再「提交词汇」生成语音词云 · 上方 Ctrl+Enter 快速提取</p>
+
+        <label class="field-label" for="speech-word-list-editor">提取词汇 <span class="label-tag">可编辑 · 可复制</span></label>
+        <textarea id="speech-word-list-editor" class="word-list-editor speech-editor" rows="4" spellcheck="false" placeholder="分词结果将显示在此（空格分隔，重复词表示词频）· 修改后点击「提交词汇」"></textarea>
+        <div class="manual-btn-grid manual-btn-grid-words" role="toolbar" aria-label="语音词汇操作">
+          <button id="btn-speech-extract-words" class="manual-btn manual-btn-extract" type="button">提取词汇</button>
+          <button id="btn-speech-copy-words" class="manual-btn manual-btn-copy" type="button">复制</button>
+          <button id="btn-speech-submit-words" class="manual-btn manual-btn-submit" type="button">提交词汇</button>
+        </div>
+        <p class="field-hint word-list-hint">词汇以空格分隔；同一词出现多次即更高词频</p>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card panel-source-section" data-panel-source="manual">
         <h2 class="card-title"><span class="card-icon">✏️</span> 手动输入</h2>
         <label class="field-label" for="word-input">文本内容 <span class="label-tag">可编辑</span></label>
         <textarea id="word-input" class="manual-input speech-editor" rows="10" placeholder="在此输入或粘贴需要分词的文本…" spellcheck="false"></textarea>
@@ -117,7 +140,7 @@
           <button id="btn-copy-words" class="manual-btn manual-btn-copy" type="button">复制</button>
           <button id="btn-submit-words" class="manual-btn manual-btn-submit" type="button">提交词汇</button>
         </div>
-        <p class="field-hint word-list-hint">词汇以空格分隔；同一词出现多次即更高词频 · 可从词库加载当前手动词云</p>
+        <p class="field-hint word-list-hint">词汇以空格分隔；同一词出现多次即更高词频</p>
       </section>
 
       <section class="panel-stats">
@@ -150,7 +173,7 @@
         </div>
       </details>
 
-      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260620 · 数据保存在本机浏览器</footer>
+      <footer class="panel-footer">录入端 · 版本 20260701 · 控制面板可一键启动本地服务</footer>
     </aside>
   </div>
 
@@ -160,17 +183,18 @@
     <p id="boot-error-msg"></p>
   </div>
 
-  <script src="js/vendor/echarts.min.js?v=20260620"></script>
-  <script src="js/vendor/echarts-wordcloud.min.js?v=20260620"></script>
-  <script src="js/config.js?v=20260620"></script>
-  <script src="js/filter.js?v=20260620"></script>
-  <script src="js/stopwords.js?v=20260620"></script>
-  <script src="js/segment.js?v=20260620"></script>
-  <script src="js/masks.js?v=20260620"></script>
-  <script src="js/sync.js?v=20260620"></script>
-  <script src="js/store.js?v=20260620"></script>
-  <script src="js/chart.js?v=20260620"></script>
-  <script src="js/demo-sample.js?v=20260620"></script>
-  <script src="js/app.js?v=20260620"></script>
+  <script src="js/vendor/echarts.min.js?v=20260704"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js?v=20260704"></script>
+  <script src="js/config.js?v=20260704"></script>
+  <script src="js/filter.js?v=20260704"></script>
+  <script src="js/stopwords.js?v=20260704"></script>
+  <script src="js/segment.js?v=20260704"></script>
+  <script src="js/masks.js?v=20260704"></script>
+  <script src="js/sync.js?v=20260704"></script>
+  <script src="js/client.js?v=20260704"></script>
+  <script src="js/store.js?v=20260704"></script>
+  <script src="js/chart.js?v=20260704"></script>
+  <script src="js/demo-sample.js?v=20260704"></script>
+  <script src="js/app.js?v=20260704"></script>
 </body>
 </html>
