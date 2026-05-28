@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#eef2f9">
+  <title>基于Python的词云可视化 · 大屏</title>
+  <link rel="stylesheet" href="css/kiosk.css">
+  <link rel="stylesheet" href="css/display.css">
+</head>
+<body class="display-mode">
+  <div id="background-layer"></div>
+  <div class="ambient ambient-1"></div>
+  <div class="ambient ambient-2"></div>
+
+  <header class="display-bar">
+    <span id="sync-indicator" class="sync-indicator">● 同步中</span>
+    <h1 class="page-title display-title">基于Python的词云可视化</h1>
+    <div class="display-stats">
+      <span id="display-source" class="display-source">语音词云</span>
+      <span>总词次 <strong id="stat-total">0</strong></span>
+      <span>词汇数 <strong id="stat-unique">0</strong></span>
+    </div>
+  </header>
+
+  <div id="wordcloud-stage" class="wordcloud-stage display-stage">
+    <div class="stage-body">
+      <div class="stage-bg-decor" aria-hidden="true"></div>
+      <div class="stage-vignette" aria-hidden="true"></div>
+      <div id="wordcloud-chart" class="wordcloud-chart"></div>
+      <div id="empty-hint" class="empty-hint stage-empty">
+        <div class="hint-icon">☁️</div>
+        <p>等待词汇输入…</p>
+        <p class="sub">控制台提交后将自动更新，无需刷新</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="boot-error" class="boot-error" hidden>
+    <p id="boot-error-msg"></p>
+  </div>
+
+  <script src="js/vendor/echarts.min.js"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js"></script>
+  <script src="js/filter.js"></script>
+  <script src="js/masks.js"></script>
+  <script src="js/sync.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/display.js"></script>
+</body>
+</html>
