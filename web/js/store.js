@@ -68,6 +68,7 @@ const WordStore = (() => {
     background = data.background || "gradient-1";
     customBgImage = data.customBgImage || null;
     shapeMask = data.shapeMask || "circle";
+    if (shapeMask === "china") shapeMask = "circle";
     customMaskImage = data.customMaskImage || null;
     revision = data.revision || revision;
 

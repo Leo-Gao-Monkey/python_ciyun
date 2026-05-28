@@ -25,83 +25,12 @@
       <div class="top-bar-side top-bar-right">
         <button id="btn-download" class="btn-download" type="button" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          下载词云图
+          <span class="btn-download-text">下载词云图</span>
         </button>
       </div>
     </header>
 
-    <aside id="control-panel" class="control-panel">
-    <header class="panel-header">
-      <h1>控制面板</h1>
-      <span id="speech-status" class="status-badge">就绪</span>
-    </header>
-
-    <section class="panel-card">
-      <h2 class="card-title"><span class="card-icon">🎙</span> 语音输入</h2>
-      <button id="btn-speak" class="btn-speak" type="button">
-        <span class="mic-ring"></span>
-        <span class="mic-icon">🎤</span>
-        <span class="btn-label">按住说话</span>
-        <span class="btn-hint">或点击切换录音 · 松手结束</span>
-      </button>
-      <p id="interim-text" class="interim-text"></p>
-      <label class="field-label" for="speech-editor">识别结果 <span class="label-tag">可编辑</span></label>
-      <textarea id="speech-editor" class="speech-editor" rows="3" placeholder="语音识别内容将显示在这里"></textarea>
-      <div class="btn-row">
-        <button id="btn-submit-speech" class="btn-primary" type="button">提交到词云</button>
-        <button id="btn-clear-speech" class="btn-ghost" type="button">清空</button>
-      </div>
-    </section>
-
-    <section class="panel-card">
-      <h2 class="card-title"><span class="card-icon">✏️</span> 手动输入</h2>
-      <div class="input-row">
-        <input id="word-input" type="text" placeholder="输入词语，回车添加" autocomplete="off">
-        <button id="btn-add" class="btn-add" type="button">添加</button>
-      </div>
-      <p class="field-hint">多个词用空格分隔 · 已启用敏感词与停用词过滤</p>
-    </section>
-
-    <section class="panel-card">
-      <h2 class="card-title"><span class="card-icon">◇</span> 词云形状</h2>
-      <div class="shape-grid" id="shape-grid"></div>
-      <label class="upload-zone" for="mask-upload">
-        <span class="upload-icon">📁</span>
-        <span>上传自定义形状图</span>
-        <span class="upload-hint">深色轮廓/剪影 · 白底或透明底 · 自动识别填充区域</span>
-      </label>
-      <input id="mask-upload" type="file" accept="image/*" hidden>
-    </section>
-
-    <section class="panel-stats">
-      <div class="stat"><span class="stat-value" id="stat-total">0</span><span class="stat-label">总词次</span></div>
-      <div class="stat"><span class="stat-value" id="stat-unique">0</span><span class="stat-label">不同词汇</span></div>
-    </section>
-
-    <details class="panel-more">
-      <summary>背景与数据管理</summary>
-      <div class="more-content">
-        <label class="field-label">页面背景</label>
-        <div class="color-row" id="bg-colors">
-          <button type="button" class="color-swatch active" data-bg="gradient-1"></button>
-          <button type="button" class="color-swatch" data-bg="gradient-2"></button>
-          <button type="button" class="color-swatch" data-bg="gradient-3"></button>
-          <button type="button" class="color-swatch" data-bg="solid-dark"></button>
-          <button type="button" class="color-swatch" data-bg="solid-light"></button>
-        </div>
-        <label class="upload-zone upload-zone-sm" for="bg-upload"><span>上传页面背景图</span></label>
-        <input id="bg-upload" type="file" accept="image/*" hidden>
-        <div class="action-row">
-          <button id="btn-export" class="btn-secondary" type="button">导出 JSON</button>
-          <button id="btn-reset" class="btn-danger" type="button">清空词云</button>
-        </div>
-      </div>
-    </details>
-
-    <footer class="panel-footer">录入端 · 手机/电脑浏览器均可使用 · 在线版数据保存在本机</footer>
-    </aside>
-
-    <!-- 词云展示区域 -->
+    <!-- 词云展示区域（置于上方） -->
     <section id="wordcloud-stage" class="wordcloud-stage">
       <div class="stage-header">
         <div class="stage-header-left">
@@ -128,6 +57,77 @@
         </div>
       </div>
     </section>
+
+    <aside id="control-panel" class="control-panel">
+      <header class="panel-header">
+        <h1>控制面板</h1>
+        <span id="speech-status" class="status-badge">就绪</span>
+      </header>
+
+      <section class="panel-card">
+        <h2 class="card-title"><span class="card-icon">🎙</span> 语音输入</h2>
+        <button id="btn-speak" class="btn-speak" type="button">
+          <span class="mic-ring"></span>
+          <span class="mic-icon">🎤</span>
+          <span class="btn-label">按住说话</span>
+          <span class="btn-hint">或点击切换录音 · 松手结束</span>
+        </button>
+        <p id="interim-text" class="interim-text"></p>
+        <label class="field-label" for="speech-editor">识别结果 <span class="label-tag">可编辑</span></label>
+        <textarea id="speech-editor" class="speech-editor" rows="3" placeholder="语音识别内容将显示在这里"></textarea>
+        <div class="btn-row">
+          <button id="btn-submit-speech" class="btn-primary" type="button">提交到词云</button>
+          <button id="btn-clear-speech" class="btn-ghost" type="button">清空</button>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <h2 class="card-title"><span class="card-icon">✏️</span> 手动输入</h2>
+        <div class="input-row">
+          <input id="word-input" type="text" placeholder="输入词语，回车添加" autocomplete="off">
+          <button id="btn-add" class="btn-add" type="button">添加</button>
+        </div>
+        <p class="field-hint">多个词用空格分隔 · 已启用敏感词与停用词过滤</p>
+      </section>
+
+      <section class="panel-card">
+        <h2 class="card-title"><span class="card-icon">◇</span> 词云形状</h2>
+        <div class="shape-grid" id="shape-grid"></div>
+        <label class="upload-zone" for="mask-upload">
+          <span class="upload-icon">📁</span>
+          <span>上传自定义形状图</span>
+          <span class="upload-hint">黑色剪影/轮廓 · 白色或透明背景 · 词语将填满轮廓内区域</span>
+        </label>
+        <input id="mask-upload" type="file" accept="image/*" hidden>
+      </section>
+
+      <section class="panel-stats">
+        <div class="stat"><span class="stat-value" id="stat-total">0</span><span class="stat-label">总词次</span></div>
+        <div class="stat"><span class="stat-value" id="stat-unique">0</span><span class="stat-label">不同词汇</span></div>
+      </section>
+
+      <details class="panel-more">
+        <summary>背景与数据管理</summary>
+        <div class="more-content">
+          <label class="field-label">页面背景</label>
+          <div class="color-row" id="bg-colors">
+            <button type="button" class="color-swatch active" data-bg="gradient-1"></button>
+            <button type="button" class="color-swatch" data-bg="gradient-2"></button>
+            <button type="button" class="color-swatch" data-bg="gradient-3"></button>
+            <button type="button" class="color-swatch" data-bg="solid-dark"></button>
+            <button type="button" class="color-swatch" data-bg="solid-light"></button>
+          </div>
+          <label class="upload-zone upload-zone-sm" for="bg-upload"><span>上传页面背景图</span></label>
+          <input id="bg-upload" type="file" accept="image/*" hidden>
+          <div class="action-row">
+            <button id="btn-export" class="btn-secondary" type="button">导出 JSON</button>
+            <button id="btn-reset" class="btn-danger" type="button">清空词云</button>
+          </div>
+        </div>
+      </details>
+
+      <footer class="panel-footer">录入端 · 手机/电脑浏览器均可使用 · 在线版数据保存在本机</footer>
+    </aside>
   </div>
 
   <div id="toast" class="toast" hidden aria-live="polite"></div>

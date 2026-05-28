@@ -14,6 +14,7 @@
 
   const chartEl = document.getElementById("wordcloud-chart");
   const stageEl = document.getElementById("wordcloud-stage");
+  const stageBody = stageEl?.querySelector(".stage-body");
   const bgLayer = document.getElementById("background-layer");
   const emptyHint = document.getElementById("empty-hint");
   const syncIndicator = document.getElementById("sync-indicator");
@@ -77,11 +78,13 @@
       updateSyncMode();
     });
 
+    requestAnimationFrame(() => WordCloudChart.resize());
     window.addEventListener("resize", debounce(() => {
       WordCloudChart.resize();
     }, 200));
-
-    requestAnimationFrame(() => WordCloudChart.resize());
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => WordCloudChart.resize(), 300);
+    });
   }
 
   function setSyncStatus(ok) {
@@ -512,7 +515,30 @@
     btnDownload.disabled = list.length === 0;
 
     await WordCloudChart.render(list, shapeMask, customMaskImage);
+    await updateShapeGuide(shapeMask, customMaskImage);
     renderPending = false;
+  }
+
+  async function updateShapeGuide(shape, customMaskUrl) {
+    if (!stageBody) return;
+    try {
+      const { w, h } = ShapeMask.MASK_SIZE;
+      if (shape === "custom" && customMaskUrl) {
+        ShapeMask.setCustomMask(customMaskUrl);
+      }
+      const canvas = await ShapeMask.getMask(
+        shape === "custom" ? "custom" : shape,
+        w,
+        h,
+      );
+      if (canvas) {
+        stageBody.style.setProperty("--shape-guide-image", `url(${canvas.toDataURL("image/png")})`);
+      } else {
+        stageBody.style.removeProperty("--shape-guide-image");
+      }
+    } catch (_) {
+      stageBody.style.removeProperty("--shape-guide-image");
+    }
   }
 
   function refreshAll() {
@@ -546,6 +572,10 @@
     bgLayer.style.background = `linear-gradient(145deg, ${colors[0]} 0%, ${colors[1]} 50%, ${colors[2]} 100%)`;
   }
 
+  function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|Mobile|MicroMessenger|WeiBo/i.test(navigator.userAgent);
+  }
+
   async function downloadWordCloudImage() {
     if (WordStore.isEmpty()) { showToast("词云为空"); return; }
     showToast("正在生成高清图片…");
@@ -555,14 +585,21 @@
     const list = WordStore.getList();
     const { shapeMask, customMaskImage } = WordStore.getShapeMask();
     const filename = `词云_${formatDate()}.png`;
+    const mobile = isMobileDevice();
+    const exportW = mobile
+      ? Math.max(600, Math.min(window.innerWidth - 24, 900))
+      : Math.max(rect.width, 400);
+    const exportH = mobile
+      ? Math.max(450, Math.min(exportW * 0.75, 680))
+      : Math.max(rect.height, 300);
 
     try {
       const exportCanvas = await WordCloudChart.exportPNG({
         list,
         shape: shapeMask,
         customMaskUrl: customMaskImage,
-        width: rect.width,
-        height: rect.height,
+        width: exportW,
+        height: exportH,
         drawBackground: drawStageBackground,
       });
 
@@ -571,56 +608,36 @@
         return;
       }
 
+      const dataUrl = exportCanvas.toDataURL("image/png");
       const blob = await new Promise((resolve) => {
         exportCanvas.toBlob((b) => resolve(b), "image/png");
       });
-      if (!blob) {
-        showToast("导出失败");
+
+      if (mobile) {
+        showMobileSaveDialog(dataUrl, blob, filename);
         return;
       }
 
-      const saved = await saveBlobToDevice(blob, filename);
-      if (saved === "share") showToast("请选择「存储到相册」或「保存文件」");
-      else if (saved === "preview") showToast("长按图片即可保存到手机");
-      else showToast("词云图已保存");
+      if (blob) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        showToast("词云图已下载");
+      } else {
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = filename;
+        a.click();
+        showToast("词云图已下载");
+      }
     } catch (err) {
       console.error(err);
       showToast("导出失败：" + (err.message || "未知错误"));
     }
   }
 
-  async function saveBlobToDevice(blob, filename) {
-    const file = new File([blob], filename, { type: "image/png" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: "词云图" });
-        return "share";
-      } catch (e) {
-        if (e?.name === "AbortError") return "cancel";
-      }
-    }
-
-    const url = URL.createObjectURL(blob);
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
-    if (isMobile && isIOS) {
-      showImageSavePreview(url);
-      return "preview";
-    }
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 15000);
-    return "download";
-  }
-
-  function showImageSavePreview(url) {
+  function showMobileSaveDialog(dataUrl, blob, filename) {
     let overlay = document.getElementById("save-preview-overlay");
     if (!overlay) {
       overlay = document.createElement("div");
@@ -629,18 +646,47 @@
       overlay.hidden = true;
       overlay.innerHTML = `
         <div class="save-preview-box">
-          <p class="save-preview-title">长按下方图片 → 保存到相册</p>
+          <p class="save-preview-title">保存词云图</p>
+          <p class="save-preview-hint">长按图片可保存到相册；或点击下方按钮分享</p>
           <img id="save-preview-img" class="save-preview-img" alt="词云图" />
-          <button type="button" id="save-preview-close" class="btn-primary">关闭</button>
+          <div class="save-preview-actions">
+            <button type="button" id="save-preview-share" class="btn-primary">分享 / 保存到相册</button>
+            <a id="save-preview-download" class="btn-secondary save-download-link" download>尝试直接下载</a>
+            <button type="button" id="save-preview-close" class="btn-ghost">关闭</button>
+          </div>
         </div>`;
       document.body.appendChild(overlay);
       overlay.querySelector("#save-preview-close").addEventListener("click", () => {
         overlay.hidden = true;
       });
     }
+
     const img = overlay.querySelector("#save-preview-img");
-    img.src = url;
+    const shareBtn = overlay.querySelector("#save-preview-share");
+    const downloadLink = overlay.querySelector("#save-preview-download");
+
+    img.src = dataUrl;
+    downloadLink.href = dataUrl;
+    downloadLink.download = filename;
+
+    shareBtn.onclick = async () => {
+      if (blob && navigator.share) {
+        try {
+          const file = new File([blob], filename, { type: "image/png" });
+          if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: "词云图" });
+            showToast("已通过系统分享保存");
+            return;
+          }
+        } catch (e) {
+          if (e?.name === "AbortError") return;
+        }
+      }
+      showToast("请长按上方图片，选择「存储图像」或「保存图片」");
+    };
+
     overlay.hidden = false;
+    showToast("可长按图片保存，或点「分享/保存到相册」");
   }
 
   async function drawStageBackground(ctx, w, h) {

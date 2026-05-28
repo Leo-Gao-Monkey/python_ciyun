@@ -1,12 +1,11 @@
 /**
  * 词云形状 Mask 生成器
- * ECharts wordCloud：mask 上较亮区域可放置文字
+ * ECharts wordCloud：mask 白色区域放置文字，词语填满后呈现清晰轮廓
  */
 const ShapeMask = (() => {
   /** @type {Map<string, HTMLCanvasElement>} */
   const cache = new Map();
   let customMaskDataUrl = null;
-  let chinaSvgDataUrl = null;
 
   const SHAPES = {
     rectangle: { label: "矩形", icon: "▭" },
@@ -15,10 +14,9 @@ const ShapeMask = (() => {
     star: { label: "星形", icon: "★" },
     cloud: { label: "云朵", icon: "☁" },
     diamond: { label: "菱形", icon: "◆" },
-    china: { label: "中国地图", icon: "🗺" },
   };
 
-  const MASK_SIZE = { w: 1024, h: 768 };
+  const MASK_SIZE = { w: 1200, h: 900 };
 
   function cacheKey(shape, w, h) {
     return `${shape}-${w}-${h}-${customMaskDataUrl ? "c" : ""}`;
@@ -37,11 +35,12 @@ const ShapeMask = (() => {
 
   function drawRectangle(ctx, w, h) {
     fillWhite(ctx);
-    ctx.fillRect(0, 0, w, h);
+    const pad = Math.min(w, h) * 0.04;
+    ctx.fillRect(pad, pad, w - pad * 2, h - pad * 2);
   }
 
   function drawCircle(ctx, w, h) {
-    const r = Math.min(w, h) * 0.46;
+    const r = Math.min(w, h) * 0.47;
     fillWhite(ctx);
     ctx.beginPath();
     ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
@@ -51,7 +50,7 @@ const ShapeMask = (() => {
   function drawHeart(ctx, w, h) {
     const cx = w / 2;
     const cy = h / 2;
-    const size = Math.min(w, h) * 0.42;
+    const size = Math.min(w, h) * 0.44;
     fillWhite(ctx);
     ctx.beginPath();
     ctx.moveTo(cx, cy + size * 0.95);
@@ -64,8 +63,8 @@ const ShapeMask = (() => {
   function drawStar(ctx, w, h) {
     const cx = w / 2;
     const cy = h / 2;
-    const outer = Math.min(w, h) * 0.46;
-    const inner = outer * 0.42;
+    const outer = Math.min(w, h) * 0.47;
+    const inner = outer * 0.4;
     const points = 5;
     fillWhite(ctx);
     ctx.beginPath();
@@ -84,8 +83,8 @@ const ShapeMask = (() => {
   function drawDiamond(ctx, w, h) {
     const cx = w / 2;
     const cy = h / 2;
-    const rw = Math.min(w, h) * 0.44;
-    const rh = Math.min(w, h) * 0.5;
+    const rw = Math.min(w, h) * 0.46;
+    const rh = Math.min(w, h) * 0.52;
     fillWhite(ctx);
     ctx.beginPath();
     ctx.moveTo(cx, cy - rh);
@@ -100,7 +99,7 @@ const ShapeMask = (() => {
     fillWhite(ctx);
     const cx = w / 2;
     const cy = h / 2;
-    const base = Math.min(w, h) * 0.13;
+    const base = Math.min(w, h) * 0.14;
     const blobs = [
       [cx - base * 2.2, cy + base * 0.3, base * 1.55],
       [cx - base * 0.8, cy - base * 0.5, base * 1.85],
@@ -115,8 +114,8 @@ const ShapeMask = (() => {
     }
   }
 
-  /** 膨胀白色区域，让自定义/复杂轮廓能容纳更多词 */
   function dilateMask(data, width, height, radius) {
+    if (radius <= 0) return;
     const src = new Uint8Array(width * height);
     for (let p = 0; p < width * height; p++) {
       src[p] = data[p * 4] > 127 ? 1 : 0;
@@ -144,9 +143,43 @@ const ShapeMask = (() => {
     }
   }
 
+  function fillInteriorHoles(data, width, height) {
+    const white = (p) => data[p * 4] > 127;
+    const outside = new Uint8Array(width * height);
+    const stack = [];
+
+    for (let x = 0; x < width; x++) {
+      stack.push(x);
+      stack.push((height - 1) * width + x);
+    }
+    for (let y = 0; y < height; y++) {
+      stack.push(y * width);
+      stack.push(y * width + width - 1);
+    }
+
+    while (stack.length) {
+      const p = stack.pop();
+      if (outside[p] || white(p)) continue;
+      outside[p] = 1;
+      const x = p % width;
+      const y = (p / width) | 0;
+      if (x > 0) stack.push(p - 1);
+      if (x < width - 1) stack.push(p + 1);
+      if (y > 0) stack.push(p - width);
+      if (y < height - 1) stack.push(p + width);
+    }
+
+    for (let p = 0; p < width * height; p++) {
+      if (!white(p) && !outside[p]) {
+        data[p * 4] = data[p * 4 + 1] = data[p * 4 + 2] = 255;
+        data[p * 4 + 3] = 255;
+      }
+    }
+  }
+
   function applyMaskFromLuminance(imageData, options = {}) {
     const { width, height, data } = imageData;
-    const { dilate = 0, invert = false } = options;
+    const { dilate = 0, fillHoles = false } = options;
 
     let lightPixels = 0;
     const lum = new Float32Array(width * height);
@@ -157,7 +190,7 @@ const ShapeMask = (() => {
       lum[p] = l * a + 255 * (1 - a);
       if (lum[p] > 200) lightPixels++;
     }
-    const whiteBackground = lightPixels > width * height * 0.45;
+    const whiteBackground = lightPixels > width * height * 0.4;
 
     for (let p = 0; p < width * height; p++) {
       const i = p * 4;
@@ -165,17 +198,25 @@ const ShapeMask = (() => {
       const l = lum[p];
       let inside;
       if (whiteBackground) {
-        inside = a > 24 && l < 215;
+        inside = a > 20 && l < 210;
       } else {
-        inside = a > 24 && l > 50;
+        inside = a > 20 && l > 60;
       }
-      if (invert) inside = !inside;
       const v = inside ? 255 : 0;
       data[i] = data[i + 1] = data[i + 2] = v;
       data[i + 3] = 255;
     }
 
+    if (fillHoles) fillInteriorHoles(data, width, height);
     if (dilate > 0) dilateMask(data, width, height, dilate);
+  }
+
+  function finalizePresetMask(canvas) {
+    const ctx = canvas.getContext("2d");
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    applyMaskFromLuminance(imageData, { dilate: 1, fillHoles: false });
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
   }
 
   const DRAWERS = {
@@ -192,73 +233,9 @@ const ShapeMask = (() => {
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
-
-    if (shape === "china") {
-      return buildChinaMaskSync(canvas, width, height) || canvas;
-    }
-
     const drawer = DRAWERS[shape] || drawCircle;
     drawer(ctx, width, height);
-    return canvas;
-  }
-
-  function drawChinaFallback(ctx, w, h) {
-    fillWhite(ctx);
-    const cx = w / 2;
-    const cy = h / 2;
-    const s = Math.min(w, h) * 0.44;
-    ctx.beginPath();
-    ctx.moveTo(cx - s * 0.52, cy - s * 0.08);
-    ctx.bezierCurveTo(cx - s * 0.48, cy - s * 0.58, cx - s * 0.08, cy - s * 0.78, cx + s * 0.28, cy - s * 0.68);
-    ctx.bezierCurveTo(cx + s * 0.58, cy - s * 0.55, cx + s * 0.78, cy - s * 0.22, cx + s * 0.72, cy + s * 0.12);
-    ctx.bezierCurveTo(cx + s * 0.66, cy + s * 0.42, cx + s * 0.42, cy + s * 0.65, cx + s * 0.1, cy + s * 0.72);
-    ctx.bezierCurveTo(cx - s * 0.2, cy + s * 0.78, cx - s * 0.48, cy + s * 0.58, cx - s * 0.58, cy + s * 0.28);
-    ctx.bezierCurveTo(cx - s * 0.64, cy + s * 0.02, cx - s * 0.58, cy - s * 0.05, cx - s * 0.52, cy - s * 0.08);
-    ctx.closePath();
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(cx + s * 0.38, cy + s * 0.15, s * 0.09, s * 0.15, 0.15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(cx - s * 0.12, cy + s * 0.48, s * 0.07, s * 0.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function buildChinaMaskSync(canvas, width, height) {
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, width, height);
-    drawChinaFallback(ctx, width, height);
-    return canvas;
-  }
-
-  function loadChinaSvgMask(width, height) {
-    if (!chinaSvgDataUrl) {
-      chinaSvgDataUrl = new URL("assets/china-map.svg", window.location.href).href;
-    }
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = createCanvas(width, height);
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(0, 0, width, height);
-        const scale = Math.min(width / img.width, height / img.height) * 0.92;
-        const dw = img.width * scale;
-        const dh = img.height * scale;
-        const dx = (width - dw) / 2;
-        const dy = (height - dh) / 2;
-        ctx.drawImage(img, dx, dy, dw, dh);
-        const imageData = ctx.getImageData(0, 0, width, height);
-        applyMaskFromLuminance(imageData, { dilate: 2 });
-        ctx.putImageData(imageData, 0, 0);
-        resolve(canvas);
-      };
-      img.onerror = () => {
-        resolve(buildChinaMaskSync(createCanvas(width, height), width, height));
-      };
-      img.src = chinaSvgDataUrl;
-    });
+    return finalizePresetMask(canvas);
   }
 
   function buildCustomMask(dataUrl, width, height) {
@@ -270,7 +247,7 @@ const ShapeMask = (() => {
         ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, width, height);
 
-        const scale = Math.min(width / img.width, height / img.height) * 0.95;
+        const scale = Math.min(width / img.width, height / img.height) * 0.9;
         const dw = img.width * scale;
         const dh = img.height * scale;
         const dx = (width - dw) / 2;
@@ -278,7 +255,20 @@ const ShapeMask = (() => {
 
         ctx.drawImage(img, dx, dy, dw, dh);
         const imageData = ctx.getImageData(0, 0, width, height);
-        applyMaskFromLuminance(imageData, { dilate: 4 });
+        applyMaskFromLuminance(imageData, { dilate: 3, fillHoles: true });
+
+        let bright = 0;
+        const d = imageData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] > 127) bright++;
+        }
+        const ratio = bright / (width * height);
+        if (ratio < 0.12) {
+          applyMaskFromLuminance(imageData, { dilate: 5, fillHoles: true });
+        } else if (ratio < 0.22) {
+          dilateMask(imageData.data, width, height, 2);
+        }
+
         ctx.putImageData(imageData, 0, 0);
         resolve(canvas);
       };
@@ -297,33 +287,11 @@ const ShapeMask = (() => {
       });
     }
 
-    if (shape === "china") {
-      const key = cacheKey("china", width, height);
-      if (cache.has(key)) return Promise.resolve(cache.get(key));
-      return loadChinaSvgMask(width, height).then((canvas) => {
-        cache.set(key, canvas);
-        return canvas;
-      });
-    }
-
     const key = cacheKey(shape, width, height);
     if (!cache.has(key)) {
       cache.set(key, buildShapeMask(shape, width, height));
     }
     return Promise.resolve(cache.get(key));
-  }
-
-  function getMaskFillRatio(shape, width, height) {
-    const key = cacheKey(shape, width, height);
-    const canvas = cache.get(key);
-    if (!canvas) return 0.5;
-    const ctx = canvas.getContext("2d");
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let bright = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i] > 127) bright++;
-    }
-    return bright / (canvas.width * canvas.height);
   }
 
   function setCustomMask(dataUrl) {
@@ -348,7 +316,6 @@ const ShapeMask = (() => {
     SHAPES,
     MASK_SIZE,
     getMask,
-    getMaskFillRatio,
     setCustomMask,
     clearCustomMask,
     getCustomMaskDataUrl,

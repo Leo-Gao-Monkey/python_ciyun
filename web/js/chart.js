@@ -31,6 +31,7 @@ const WordCloudChart = (() => {
         return;
       }
       const img = new Image();
+      img.crossOrigin = "anonymous";
       img.onload = () => {
         currentMaskImage = img;
         resolve(img);
@@ -52,7 +53,7 @@ const WordCloudChart = (() => {
 
   async function resolveMask(shape, customMaskUrl) {
     currentShape = shape;
-    const { w: maskW, h: maskH } = ShapeMask.MASK_SIZE || { w: 1024, h: 768 };
+    const { w: maskW, h: maskH } = ShapeMask.MASK_SIZE;
 
     try {
       if (shape === "custom" && customMaskUrl) {
@@ -79,22 +80,21 @@ const WordCloudChart = (() => {
   }
 
   function computeGridSize(shape, wordCount, forExport) {
-    const masked = !!currentMaskImage;
-    if (!masked) return forExport ? 8 : 10;
+    if (!currentMaskImage) return forExport ? 8 : 10;
 
-    let size = forExport ? 6 : 8;
+    let size = forExport ? 4 : 5;
     if (shape === "custom") {
-      size = forExport ? 3 : 4;
-      if (maskFillRatio < 0.15) size = forExport ? 2 : 3;
-      else if (maskFillRatio < 0.25) size = forExport ? 3 : 4;
-    } else if (shape === "china") {
-      size = forExport ? 4 : 5;
-    } else {
+      if (maskFillRatio < 0.12) size = forExport ? 2 : 3;
+      else if (maskFillRatio < 0.2) size = forExport ? 3 : 4;
+      else size = forExport ? 4 : 5;
+    } else if (shape === "rectangle") {
       size = forExport ? 5 : 6;
+    } else {
+      size = forExport ? 4 : 5;
     }
 
-    if (wordCount > 60) size += 1;
-    if (wordCount > 120) size += 1;
+    if (wordCount > 40) size += 1;
+    if (wordCount > 80) size += 1;
     return Math.max(2, size);
   }
 
@@ -102,17 +102,16 @@ const WordCloudChart = (() => {
     const wordCount = data.length;
     const useMask = !!currentMaskImage;
     const gridSize = computeGridSize(shape, wordCount, forExport);
-    const isFullRect = shape === "rectangle" && !useMask;
 
     const series = {
       type: "wordCloud",
       shape: "circle",
       left: "center",
       top: "center",
-      width: isFullRect ? "98%" : "94%",
-      height: isFullRect ? "98%" : "94%",
-      sizeRange: forExport ? [16, 80] : [12, 62],
-      rotationRange: [-45, 45],
+      width: "92%",
+      height: "92%",
+      sizeRange: forExport ? [14, 72] : [11, 56],
+      rotationRange: [-30, 30],
       rotationStep: 15,
       gridSize,
       drawOutOfBound: false,
@@ -152,7 +151,7 @@ const WordCloudChart = (() => {
         return;
       }
       let settled = false;
-      const settleDelay = timeoutMs > 4000 ? 350 : 200;
+      const settleDelay = timeoutMs > 4000 ? 400 : 200;
       const done = () => {
         if (settled) return;
         settled = true;
@@ -181,7 +180,7 @@ const WordCloudChart = (() => {
 
     if (exportMode) {
       chart.resize();
-      await waitUntilReady(chart, 6000);
+      await waitUntilReady(chart, 8000);
     }
   }
 
@@ -227,7 +226,7 @@ const WordCloudChart = (() => {
       exportChart.resize({ width: w, height: h });
       exportChart.clear();
       exportChart.setOption(buildOption(list, shape, true), { notMerge: true });
-      await waitUntilReady(exportChart, 8000);
+      await waitUntilReady(exportChart, 10000);
 
       const chartCanvas = captureFromChart(exportChart, pr);
       if (!chartCanvas?.width) return null;
