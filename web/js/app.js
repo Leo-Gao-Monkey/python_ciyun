@@ -14,7 +14,6 @@
 
   const chartEl = document.getElementById("wordcloud-chart");
   const stageEl = document.getElementById("wordcloud-stage");
-  const stageBody = stageEl?.querySelector(".stage-body");
   const bgLayer = document.getElementById("background-layer");
   const emptyHint = document.getElementById("empty-hint");
   const syncIndicator = document.getElementById("sync-indicator");
@@ -515,30 +514,7 @@
     btnDownload.disabled = list.length === 0;
 
     await WordCloudChart.render(list, shapeMask, customMaskImage);
-    await updateShapeGuide(shapeMask, customMaskImage);
     renderPending = false;
-  }
-
-  async function updateShapeGuide(shape, customMaskUrl) {
-    if (!stageBody) return;
-    try {
-      const { w, h } = ShapeMask.MASK_SIZE;
-      if (shape === "custom" && customMaskUrl) {
-        ShapeMask.setCustomMask(customMaskUrl);
-      }
-      const canvas = await ShapeMask.getMask(
-        shape === "custom" ? "custom" : shape,
-        w,
-        h,
-      );
-      if (canvas) {
-        stageBody.style.setProperty("--shape-guide-image", `url(${canvas.toDataURL("image/png")})`);
-      } else {
-        stageBody.style.removeProperty("--shape-guide-image");
-      }
-    } catch (_) {
-      stageBody.style.removeProperty("--shape-guide-image");
-    }
   }
 
   function refreshAll() {

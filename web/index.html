@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#eef2f9">
   <meta name="description" content="基于 Python 的词云可视化 — 支持语音输入、手动录入与实时词云展示">
   <title>基于Python的词云可视化</title>
-  <link rel="stylesheet" href="css/kiosk.css?v=20260528">
+  <link rel="stylesheet" href="css/kiosk.css?v=20260529">
 </head>
 <body class="console-layout">
   <div id="background-layer"></div>
@@ -96,7 +96,7 @@
         <label class="upload-zone" for="mask-upload">
           <span class="upload-icon">📁</span>
           <span>上传自定义形状图</span>
-          <span class="upload-hint">黑色剪影/轮廓 · 白色或透明背景 · 词语将填满轮廓内区域</span>
+          <span class="upload-hint">黑色剪影/轮廓 · 白底或透明底 · 词语沿轮廓边缘排列</span>
         </label>
         <input id="mask-upload" type="file" accept="image/*" hidden>
       </section>
@@ -126,7 +126,7 @@
         </div>
       </details>
 
-      <footer class="panel-footer">录入端 · 词云在上 / 操作在下 · 版本 20260528 · 数据保存在本机浏览器</footer>
+      <footer class="panel-footer">录入端 · 轮廓词云 · 版本 20260529 · 数据保存在本机浏览器</footer>
     </aside>
   </div>
 
@@ -136,15 +136,15 @@
     <p id="boot-error-msg"></p>
   </div>
 
-  <script src="js/vendor/echarts.min.js?v=20260528"></script>
-  <script src="js/vendor/echarts-wordcloud.min.js?v=20260528"></script>
-  <script src="js/filter.js?v=20260528"></script>
-  <script src="js/stopwords.js?v=20260528"></script>
-  <script src="js/segment.js?v=20260528"></script>
-  <script src="js/masks.js?v=20260528"></script>
-  <script src="js/sync.js?v=20260528"></script>
-  <script src="js/store.js?v=20260528"></script>
-  <script src="js/chart.js?v=20260528"></script>
-  <script src="js/app.js?v=20260528"></script>
+  <script src="js/vendor/echarts.min.js?v=20260529"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js?v=20260529"></script>
+  <script src="js/filter.js?v=20260529"></script>
+  <script src="js/stopwords.js?v=20260529"></script>
+  <script src="js/segment.js?v=20260529"></script>
+  <script src="js/masks.js?v=20260529"></script>
+  <script src="js/sync.js?v=20260529"></script>
+  <script src="js/store.js?v=20260529"></script>
+  <script src="js/chart.js?v=20260529"></script>
+  <script src="js/app.js?v=20260529"></script>
 </body>
 </html>

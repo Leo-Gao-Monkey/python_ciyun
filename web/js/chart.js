@@ -82,19 +82,13 @@ const WordCloudChart = (() => {
   function computeGridSize(shape, wordCount, forExport) {
     if (!currentMaskImage) return forExport ? 8 : 10;
 
-    let size = forExport ? 4 : 5;
-    if (shape === "custom") {
-      if (maskFillRatio < 0.12) size = forExport ? 2 : 3;
-      else if (maskFillRatio < 0.2) size = forExport ? 3 : 4;
-      else size = forExport ? 4 : 5;
-    } else if (shape === "rectangle") {
-      size = forExport ? 5 : 6;
-    } else {
-      size = forExport ? 4 : 5;
-    }
+    // 轮廓环带区域较窄，使用更小 gridSize 让词语沿边缘排布
+    let size = forExport ? 2 : 3;
+    if (maskFillRatio < 0.06) size = forExport ? 2 : 2;
+    else if (maskFillRatio < 0.12) size = forExport ? 2 : 3;
 
-    if (wordCount > 40) size += 1;
-    if (wordCount > 80) size += 1;
+    if (wordCount > 50) size += 1;
+    if (wordCount > 100) size += 1;
     return Math.max(2, size);
   }
 
@@ -110,8 +104,8 @@ const WordCloudChart = (() => {
       top: "center",
       width: "92%",
       height: "92%",
-      sizeRange: forExport ? [14, 72] : [11, 56],
-      rotationRange: [-30, 30],
+      sizeRange: forExport ? [12, 52] : [10, 44],
+      rotationRange: [-90, 90],
       rotationStep: 15,
       gridSize,
       drawOutOfBound: false,
