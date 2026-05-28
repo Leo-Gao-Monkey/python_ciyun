@@ -131,10 +131,6 @@ const WordStore = (() => {
     return source === "voice" ? voiceFrequencies : manualFrequencies;
   }
 
-  /**
-   * @param {string[]} words
-   * @param {'voice'|'manual'} source
-   */
   function addWords(words, source = "manual") {
     if (!words || words.length === 0) return { added: 0, blocked: [], stopped: [] };
 
@@ -155,6 +151,43 @@ const WordStore = (() => {
     }
     if (added > 0) save();
     return { added, blocked, stopped };
+  }
+
+  /** 用词汇列表替换指定来源的词频（用于编辑后重新提交） */
+  function replaceWords(words, source = "manual") {
+    if (!words || words.length === 0) {
+      targetMap(source).clear();
+      save();
+      return { added: 0, blocked: [], stopped: [] };
+    }
+
+    const { allowed: sensAllowed, blocked } = SensitiveFilter.filterWords(words);
+    const { allowed, stopped } = StopwordsFilter.filterWords(sensAllowed);
+    const map = targetMap(source);
+    map.clear();
+    let added = 0;
+
+    for (const word of allowed) {
+      const parts = word.length > Segmenter.MAX_WORD_LEN
+        ? Segmenter.extractWords(word)
+        : [word];
+      for (const p of parts) {
+        if (!p.trim() || StopwordsFilter.isStopword(p)) continue;
+        map.set(p, (map.get(p) || 0) + 1);
+        added += 1;
+      }
+    }
+    save();
+    return { added, blocked, stopped };
+  }
+
+  function getFullListForSource(source) {
+    const map = source === "voice" ? voiceFrequencies
+      : source === "manual" ? manualFrequencies
+        : mergeMaps(voiceFrequencies, manualFrequencies);
+    return Array.from(map.entries())
+      .filter(([word]) => !StopwordsFilter.isStopword(word))
+      .sort((a, b) => b[1] - a[1]);
   }
 
   function getActiveMap() {
@@ -270,8 +303,10 @@ const WordStore = (() => {
   return {
     STORAGE_KEY,
     addWords,
+    replaceWords,
     getList,
     getFullList,
+    getFullListForSource,
     getStats,
     MAX_CLOUD_WORDS,
     isEmpty,

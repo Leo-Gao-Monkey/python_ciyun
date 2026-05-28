@@ -31,6 +31,7 @@
   const btnSubmitSpeech = document.getElementById("btn-submit-speech");
   const btnClearSpeech = document.getElementById("btn-clear-speech");
   const wordInput = document.getElementById("word-input");
+  const wordListEditor = document.getElementById("word-list-editor");
   const speechEditor = document.getElementById("speech-editor");
   const interimText = document.getElementById("interim-text");
   const speechStatus = document.getElementById("speech-status");
@@ -146,6 +147,7 @@
     refreshChart(false);
     updateStats();
     updateSourceTabs();
+    if (WordStore.getDisplaySource() === "manual") syncWordListFromStore();
     emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
     btnDownload.disabled = WordStore.isEmpty();
     applyBackground();
@@ -216,18 +218,101 @@
     showToast(`已切换为${label}词云`);
   }
 
+  function wordsToEditorText(words) {
+    return words.filter(Boolean).join(" ");
+  }
+
+  function parseWordsFromEditor(text) {
+    if (!text || !text.trim()) return [];
+    return text.trim().split(/[\s,，;；、]+/).map((w) => w.trim()).filter(Boolean);
+  }
+
+  function listToEditorText(entries) {
+    const tokens = [];
+    for (const [word, count] of entries) {
+      for (let i = 0; i < count; i++) tokens.push(word);
+    }
+    return tokens.join(" ");
+  }
+
+  function syncWordListFromStore() {
+    if (!wordListEditor) return;
+    const list = WordStore.getFullListForSource("manual");
+    wordListEditor.value = list.length > 0 ? listToEditorText(list) : "";
+  }
+
+  async function extractToWordList() {
+    const text = wordInput?.value.trim();
+    if (!text) {
+      showToast("请先在上方输入文本");
+      return;
+    }
+    const words = await Segmenter.extractWordsAsync(text);
+    if (wordListEditor) wordListEditor.value = wordsToEditorText(words);
+    updateSegmentBadge();
+    showToast(`已提取 ${words.length} 个词，可在下方编辑后提交`);
+    return words;
+  }
+
+  async function submitWordList() {
+    if (!wordListEditor) return;
+    const words = parseWordsFromEditor(wordListEditor.value);
+    if (words.length === 0) {
+      showToast("词汇列表为空，请先提取或输入词汇");
+      return;
+    }
+    WordStore.setDisplaySource("manual");
+    updateSourceTabs();
+    const result = WordStore.replaceWords(words, "manual");
+    if (result.added > 0) {
+      await refreshChart(true);
+      updateStats();
+      updateSegmentBadge();
+      emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
+      btnDownload.disabled = false;
+      showToast(`已提交 ${result.added} 个词到词云${result.blocked.length ? `，拦截 ${result.blocked.length} 个敏感词` : ""}`);
+    } else if (result.blocked.length) {
+      showToast(`含敏感词已拦截：${result.blocked.join("、")}`);
+    } else {
+      showToast("未识别到有效词汇");
+    }
+  }
+
+  async function copyWordList() {
+    const text = wordListEditor?.value.trim();
+    if (!text) {
+      showToast("暂无词汇可复制");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("词汇已复制到剪贴板");
+    } catch (_) {
+      wordListEditor.select();
+      document.execCommand("copy");
+      showToast("词汇已复制");
+    }
+  }
+
   async function resegmentManual() {
     const text = wordInput?.value.trim();
     if (!text) {
       showToast("请先在文本框中输入内容");
       return;
     }
+    const words = await extractToWordList();
+    if (!words?.length) return;
     WordStore.setDisplaySource("manual");
     updateSourceTabs();
     WordStore.clearDisplay();
-    const result = await ingestText(text, "manual");
+    const result = WordStore.replaceWords(words, "manual");
     const engine = Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典";
     if (result.added > 0) {
+      await refreshChart(true);
+      updateStats();
+      updateSegmentBadge();
+      emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
+      btnDownload.disabled = false;
       showToast(`已重新分词（${engine}），共 ${result.added} 个词`);
     } else {
       showToast("重新分词未得到有效词汇");
@@ -244,12 +329,8 @@
   }
 
   async function initManualInput() {
-    if (!wordInput || typeof DemoSample === "undefined") return;
-    const text = DemoSample.getManualIntroText();
-    wordInput.value = text;
-    if (WordStore.isAllEmpty()) {
-      await ingestText(text, "manual");
-    }
+    if (wordInput) wordInput.value = "";
+    if (wordListEditor) wordListEditor.value = "";
   }
 
   async function loadDemoSample() {
@@ -257,6 +338,7 @@
     const text = DemoSample.getText();
     if (wordInput) wordInput.value = text;
     const result = await ingestText(text, "manual");
+    syncWordListFromStore();
     if (result.added > 0) {
       showToast(`已载入形状预览示例（${result.added} 个词）`);
     } else {
@@ -283,6 +365,7 @@
       if (!btn) return;
       WordStore.setDisplaySource(btn.dataset.source);
       updateSourceTabs();
+      if (btn.dataset.source === "manual") syncWordListFromStore();
       refreshChart(true);
       updateStats();
       emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
@@ -311,11 +394,20 @@
     btnAdd.addEventListener("click", submitManualInput);
     btnLoadDemo?.addEventListener("click", loadDemoSample);
     document.getElementById("btn-resegment")?.addEventListener("click", resegmentManual);
+    document.getElementById("btn-extract-words")?.addEventListener("click", extractToWordList);
+    document.getElementById("btn-copy-words")?.addEventListener("click", copyWordList);
+    document.getElementById("btn-submit-words")?.addEventListener("click", submitWordList);
     document.getElementById("btn-save-user-dict")?.addEventListener("click", saveUserDictFromPanel);
     wordInput?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        submitManualInput();
+        extractToWordList();
+      }
+    });
+    wordListEditor?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        submitWordList();
       }
     });
     btnDownload.addEventListener("click", downloadWordCloudImage);
@@ -762,13 +854,27 @@
   async function submitManualInput() {
     const text = wordInput.value.trim();
     if (!text) return;
-    const result = await ingestText(text, "manual");
+    const words = await Segmenter.extractWordsAsync(text);
+    if (words.length === 0) {
+      showToast("未识别到有效词汇");
+      return;
+    }
+    if (wordListEditor) {
+      const existing = parseWordsFromEditor(wordListEditor.value);
+      wordListEditor.value = wordsToEditorText(existing.concat(words));
+    }
+    WordStore.setDisplaySource("manual");
+    updateSourceTabs();
+    const result = WordStore.addWords(words, "manual");
     if (result.added > 0) {
-      showToast(`已提交 ${result.added} 个词（${Segmenter.getLastEngine() === "jieba" ? "jieba" : "本地词典"}）${result.blocked.length ? `，拦截敏感词 ${result.blocked.length} 个` : ""}`);
+      await refreshChart(true);
+      updateStats();
+      updateSegmentBadge();
+      emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
+      btnDownload.disabled = false;
+      showToast(`已追加 ${result.added} 个词（${Segmenter.getLastEngine() === "jieba" ? "jieba" : "词典"}）${result.blocked.length ? `，拦截 ${result.blocked.length} 个` : ""}`);
     } else if (result.blocked.length) {
       showToast(`含敏感词已拦截：${result.blocked.join("、")}`);
-    } else {
-      showToast("未识别到有效词汇");
     }
   }
 
@@ -784,7 +890,7 @@
       emptyHint.classList.toggle("hidden", !WordStore.isEmpty());
       btnDownload.disabled = false;
     }
-    return result;
+    return { ...result, words };
   }
 
   async function refreshChart(animate) {

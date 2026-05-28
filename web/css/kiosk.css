@@ -950,18 +950,84 @@ body.console-layout {
   max-height: 320px;
 }
 
-.manual-actions {
+.manual-btn-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
   margin-top: 8px;
 }
 
-.manual-actions .btn-add {
-  flex: 1;
-  min-width: 0;
+.manual-btn-grid-words {
+  margin-top: 4px;
 }
 
-.manual-actions .btn-secondary {
-  flex-shrink: 0;
+.manual-btn {
+  min-height: var(--touch-min);
+  padding: 0 10px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: #fff;
   white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.manual-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.manual-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.96);
+}
+
+/* 提取并追加 — 蓝紫 */
+.manual-btn-append {
+  background: linear-gradient(145deg, #6366f1, #4f46e5);
+}
+
+/* 重新分词 — 琥珀 */
+.manual-btn-resegment {
+  background: linear-gradient(145deg, #f59e0b, #d97706);
+}
+
+/* 载入短示例 — 青色 */
+.manual-btn-demo {
+  background: linear-gradient(145deg, #06b6d4, #0891b2);
+}
+
+/* 提取词汇 — 紫色 */
+.manual-btn-extract {
+  background: linear-gradient(145deg, #8b5cf6, #7c3aed);
+}
+
+/* 复制 — 灰蓝 */
+.manual-btn-copy {
+  background: linear-gradient(145deg, #94a3b8, #64748b);
+}
+
+/* 提交词汇 — 绿色 */
+.manual-btn-submit {
+  background: linear-gradient(145deg, #22c55e, #16a34a);
+}
+
+.word-list-editor {
+  min-height: 88px;
+  max-height: 200px;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  word-break: break-all;
+}
+
+.word-list-hint {
+  margin-top: 6px;
 }
 
 .user-dict-input {
@@ -1000,14 +1066,6 @@ body.console-layout {
   font-size: 0.9rem;
   font-family: inherit;
   cursor: pointer;
-}
-
-.btn-load-demo {
-  min-height: var(--touch-min);
-  flex-shrink: 0;
-  white-space: nowrap;
-  padding: 0 12px;
-  font-size: 0.88rem;
 }
 
 .field-hint {
@@ -1408,6 +1466,21 @@ body.console-layout {
   .manual-input,
   .speech-editor {
     font-size: 16px;
+  }
+
+  .manual-btn-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .manual-btn-grid .manual-btn-submit {
+    grid-column: 1 / -1;
+  }
+
+  .manual-btn {
+    font-size: 0.82rem;
+    white-space: normal;
+    line-height: 1.25;
+    padding: 8px 6px;
   }
 }
 

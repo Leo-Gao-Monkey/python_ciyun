@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#eef2f9">
   <meta name="description" content="基于 Python 的词云可视化 — 支持语音输入、手动录入与实时词云展示">
   <title>基于Python的词云可视化</title>
-  <link rel="stylesheet" href="css/kiosk.css?v=20260617">
+  <link rel="stylesheet" href="css/kiosk.css?v=20260620">
 </head>
 <body class="console-layout">
   <div id="background-layer"></div>
@@ -102,13 +102,22 @@
       <section class="panel-card">
         <h2 class="card-title"><span class="card-icon">✏️</span> 手动输入</h2>
         <label class="field-label" for="word-input">文本内容 <span class="label-tag">可编辑</span></label>
-        <textarea id="word-input" class="manual-input speech-editor" rows="10" placeholder="输入或粘贴文本，提交后生成词云" spellcheck="false"></textarea>
-        <div class="input-row manual-actions">
-          <button id="btn-add" class="btn-add" type="button">提交到词云</button>
-          <button id="btn-resegment" class="btn-secondary" type="button">重新分词</button>
-          <button id="btn-load-demo" class="btn-secondary btn-load-demo" type="button">载入短示例</button>
+        <textarea id="word-input" class="manual-input speech-editor" rows="10" placeholder="在此输入或粘贴需要分词的文本…" spellcheck="false"></textarea>
+        <div class="manual-btn-grid" role="toolbar" aria-label="文本操作">
+          <button id="btn-add" class="manual-btn manual-btn-append" type="button">提取并追加</button>
+          <button id="btn-resegment" class="manual-btn manual-btn-resegment" type="button">重新分词</button>
+          <button id="btn-load-demo" class="manual-btn manual-btn-demo" type="button">载入短示例</button>
         </div>
-        <p class="field-hint">有网络且运行 serve.py 时用 jieba；否则用领域词典。误拆词请点「重新分词」或添加自定义词条 · Ctrl+Enter 提交</p>
+        <p class="field-hint">输入文本后「提取词汇」，在下方核对修改，再「提交词汇」生成词云 · 上方 Ctrl+Enter 快速提取</p>
+
+        <label class="field-label" for="word-list-editor">提取词汇 <span class="label-tag">可编辑 · 可复制</span></label>
+        <textarea id="word-list-editor" class="word-list-editor speech-editor" rows="4" spellcheck="false" placeholder="分词结果将显示在此（空格分隔，重复词表示词频）· 修改后点击「提交词汇」"></textarea>
+        <div class="manual-btn-grid manual-btn-grid-words" role="toolbar" aria-label="词汇操作">
+          <button id="btn-extract-words" class="manual-btn manual-btn-extract" type="button">提取词汇</button>
+          <button id="btn-copy-words" class="manual-btn manual-btn-copy" type="button">复制</button>
+          <button id="btn-submit-words" class="manual-btn manual-btn-submit" type="button">提交词汇</button>
+        </div>
+        <p class="field-hint word-list-hint">词汇以空格分隔；同一词出现多次即更高词频 · 可从词库加载当前手动词云</p>
       </section>
 
       <section class="panel-stats">
@@ -141,7 +150,7 @@
         </div>
       </details>
 
-      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260617 · 数据保存在本机浏览器</footer>
+      <footer class="panel-footer">录入端 · 形状词云 · 版本 20260620 · 数据保存在本机浏览器</footer>
     </aside>
   </div>
 
@@ -151,17 +160,17 @@
     <p id="boot-error-msg"></p>
   </div>
 
-  <script src="js/vendor/echarts.min.js?v=20260617"></script>
-  <script src="js/vendor/echarts-wordcloud.min.js?v=20260617"></script>
-  <script src="js/config.js?v=20260617"></script>
-  <script src="js/filter.js?v=20260617"></script>
-  <script src="js/stopwords.js?v=20260617"></script>
-  <script src="js/segment.js?v=20260617"></script>
-  <script src="js/masks.js?v=20260617"></script>
-  <script src="js/sync.js?v=20260617"></script>
-  <script src="js/store.js?v=20260617"></script>
-  <script src="js/chart.js?v=20260617"></script>
-  <script src="js/demo-sample.js?v=20260617"></script>
-  <script src="js/app.js?v=20260617"></script>
+  <script src="js/vendor/echarts.min.js?v=20260620"></script>
+  <script src="js/vendor/echarts-wordcloud.min.js?v=20260620"></script>
+  <script src="js/config.js?v=20260620"></script>
+  <script src="js/filter.js?v=20260620"></script>
+  <script src="js/stopwords.js?v=20260620"></script>
+  <script src="js/segment.js?v=20260620"></script>
+  <script src="js/masks.js?v=20260620"></script>
+  <script src="js/sync.js?v=20260620"></script>
+  <script src="js/store.js?v=20260620"></script>
+  <script src="js/chart.js?v=20260620"></script>
+  <script src="js/demo-sample.js?v=20260620"></script>
+  <script src="js/app.js?v=20260620"></script>
 </body>
 </html>
