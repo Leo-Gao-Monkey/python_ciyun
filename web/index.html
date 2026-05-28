@@ -59,7 +59,7 @@
         <input id="word-input" type="text" placeholder="输入词语，回车添加" autocomplete="off">
         <button id="btn-add" class="btn-add" type="button">添加</button>
       </div>
-      <p class="field-hint">多个词用空格分隔 · 已启用敏感词过滤</p>
+      <p class="field-hint">多个词用空格分隔 · 已启用敏感词与停用词过滤</p>
     </section>
 
     <section class="panel-card">
@@ -68,7 +68,7 @@
       <label class="upload-zone" for="mask-upload">
         <span class="upload-icon">📁</span>
         <span>上传自定义形状图</span>
-        <span class="upload-hint">白底/透明底 + 深色轮廓</span>
+        <span class="upload-hint">深色轮廓/剪影 · 白底或透明底 · 自动识别填充区域</span>
       </label>
       <input id="mask-upload" type="file" accept="image/*" hidden>
     </section>
@@ -139,6 +139,7 @@
   <script src="js/vendor/echarts.min.js"></script>
   <script src="js/vendor/echarts-wordcloud.min.js"></script>
   <script src="js/filter.js"></script>
+  <script src="js/stopwords.js"></script>
   <script src="js/segment.js"></script>
   <script src="js/masks.js"></script>
   <script src="js/sync.js"></script>

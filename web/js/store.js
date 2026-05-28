@@ -132,9 +132,10 @@ const WordStore = (() => {
    * @param {'voice'|'manual'} source
    */
   function addWords(words, source = "manual") {
-    if (!words || words.length === 0) return { added: 0, blocked: [] };
+    if (!words || words.length === 0) return { added: 0, blocked: [], stopped: [] };
 
-    const { allowed, blocked } = SensitiveFilter.filterWords(words);
+    const { allowed: sensAllowed, blocked } = SensitiveFilter.filterWords(words);
+    const { allowed, stopped } = StopwordsFilter.filterWords(sensAllowed);
     const map = targetMap(source);
     let added = 0;
 
@@ -143,13 +144,13 @@ const WordStore = (() => {
         ? Segmenter.extractWords(word)
         : [word];
       for (const p of parts) {
-        if (!p.trim()) continue;
+        if (!p.trim() || StopwordsFilter.isStopword(p)) continue;
         map.set(p, (map.get(p) || 0) + 1);
         added += 1;
       }
     }
     if (added > 0) save();
-    return { added, blocked };
+    return { added, blocked, stopped };
   }
 
   function getActiveMap() {
@@ -158,18 +159,20 @@ const WordStore = (() => {
   }
 
   function getList() {
-    return Array.from(getActiveMap().entries()).sort((a, b) => b[1] - a[1]);
+    return Array.from(getActiveMap().entries())
+      .filter(([word]) => !StopwordsFilter.isStopword(word))
+      .sort((a, b) => b[1] - a[1]);
   }
 
   function getStats() {
-    const map = getActiveMap();
+    const list = getList();
     let total = 0;
-    for (const count of map.values()) total += count;
-    return { total, unique: map.size };
+    for (const [, count] of list) total += count;
+    return { total, unique: list.length };
   }
 
   function isEmpty() {
-    return getActiveMap().size === 0;
+    return getList().length === 0;
   }
 
   function isAllEmpty() {

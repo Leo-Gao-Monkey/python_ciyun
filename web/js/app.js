@@ -554,6 +554,7 @@
     const rect = exportEl.getBoundingClientRect();
     const list = WordStore.getList();
     const { shapeMask, customMaskImage } = WordStore.getShapeMask();
+    const filename = `词云_${formatDate()}.png`;
 
     try {
       const exportCanvas = await WordCloudChart.exportPNG({
@@ -570,19 +571,76 @@
         return;
       }
 
-      exportCanvas.toBlob((blob) => {
-        if (!blob) { showToast("导出失败"); return; }
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `词云_${formatDate()}.png`;
-        a.click();
-        URL.revokeObjectURL(a.href);
-        showToast("词云图已下载");
-      }, "image/png");
+      const blob = await new Promise((resolve) => {
+        exportCanvas.toBlob((b) => resolve(b), "image/png");
+      });
+      if (!blob) {
+        showToast("导出失败");
+        return;
+      }
+
+      const saved = await saveBlobToDevice(blob, filename);
+      if (saved === "share") showToast("请选择「存储到相册」或「保存文件」");
+      else if (saved === "preview") showToast("长按图片即可保存到手机");
+      else showToast("词云图已保存");
     } catch (err) {
       console.error(err);
       showToast("导出失败：" + (err.message || "未知错误"));
     }
+  }
+
+  async function saveBlobToDevice(blob, filename) {
+    const file = new File([blob], filename, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "词云图" });
+        return "share";
+      } catch (e) {
+        if (e?.name === "AbortError") return "cancel";
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+    if (isMobile && isIOS) {
+      showImageSavePreview(url);
+      return "preview";
+    }
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    return "download";
+  }
+
+  function showImageSavePreview(url) {
+    let overlay = document.getElementById("save-preview-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "save-preview-overlay";
+      overlay.className = "save-preview-overlay";
+      overlay.hidden = true;
+      overlay.innerHTML = `
+        <div class="save-preview-box">
+          <p class="save-preview-title">长按下方图片 → 保存到相册</p>
+          <img id="save-preview-img" class="save-preview-img" alt="词云图" />
+          <button type="button" id="save-preview-close" class="btn-primary">关闭</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector("#save-preview-close").addEventListener("click", () => {
+        overlay.hidden = true;
+      });
+    }
+    const img = overlay.querySelector("#save-preview-img");
+    img.src = url;
+    overlay.hidden = false;
   }
 
   async function drawStageBackground(ctx, w, h) {

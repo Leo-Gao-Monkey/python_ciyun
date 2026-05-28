@@ -8,21 +8,12 @@ const WordCloudChart = (() => {
     "#0e7490", "#b45309", "#1d4ed8", "#334155",
   ];
 
-  const SHAPE_MAP = {
-    rectangle: "circle",
-    circle: "circle",
-    heart: "cardioid",
-    star: "star",
-    diamond: "diamond",
-    cloud: "circle",
-    custom: "circle",
-  };
-
   /** @type {echarts.ECharts | null} */
   let chart = null;
   let containerEl = null;
   let currentMaskImage = null;
   let currentShape = "circle";
+  let maskFillRatio = 1;
 
   function init(container) {
     containerEl = container;
@@ -35,6 +26,7 @@ const WordCloudChart = (() => {
     return new Promise((resolve, reject) => {
       if (!dataUrl) {
         currentMaskImage = null;
+        maskFillRatio = 1;
         resolve(null);
         return;
       }
@@ -48,35 +40,81 @@ const WordCloudChart = (() => {
     });
   }
 
+  function fillRatioFromCanvas(canvas) {
+    const ctx = canvas.getContext("2d");
+    const { width, height, data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let bright = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 127) bright++;
+    }
+    return bright / (width * height);
+  }
+
   async function resolveMask(shape, customMaskUrl) {
     currentShape = shape;
-    if (shape === "custom" && customMaskUrl) {
-      return loadMaskImage(customMaskUrl);
-    }
-    if (shape === "cloud" || shape === "rectangle") {
-      const canvas = ShapeMask.buildShapeMask(shape, 800, 600);
+    const { w: maskW, h: maskH } = ShapeMask.MASK_SIZE || { w: 1024, h: 768 };
+
+    try {
+      if (shape === "custom" && customMaskUrl) {
+        ShapeMask.setCustomMask(customMaskUrl);
+      }
+      const canvas = await ShapeMask.getMask(
+        shape === "custom" ? "custom" : shape,
+        maskW,
+        maskH,
+      );
+      if (!canvas) {
+        currentMaskImage = null;
+        maskFillRatio = 1;
+        return null;
+      }
+      maskFillRatio = fillRatioFromCanvas(canvas);
       return loadMaskImage(canvas.toDataURL("image/png"));
+    } catch (err) {
+      console.warn("Mask 加载失败", err);
+      currentMaskImage = null;
+      maskFillRatio = 1;
+      return null;
     }
-    currentMaskImage = null;
-    return null;
+  }
+
+  function computeGridSize(shape, wordCount, forExport) {
+    const masked = !!currentMaskImage;
+    if (!masked) return forExport ? 8 : 10;
+
+    let size = forExport ? 6 : 8;
+    if (shape === "custom") {
+      size = forExport ? 3 : 4;
+      if (maskFillRatio < 0.15) size = forExport ? 2 : 3;
+      else if (maskFillRatio < 0.25) size = forExport ? 3 : 4;
+    } else if (shape === "china") {
+      size = forExport ? 4 : 5;
+    } else {
+      size = forExport ? 5 : 6;
+    }
+
+    if (wordCount > 60) size += 1;
+    if (wordCount > 120) size += 1;
+    return Math.max(2, size);
   }
 
   function buildOption(data, shape, forExport = false) {
-    const echartsShape = SHAPE_MAP[shape] || "circle";
-    const isFullRect = shape === "rectangle";
-    const useMask = currentMaskImage && (shape === "custom" || shape === "cloud" || shape === "rectangle");
+    const wordCount = data.length;
+    const useMask = !!currentMaskImage;
+    const gridSize = computeGridSize(shape, wordCount, forExport);
+    const isFullRect = shape === "rectangle" && !useMask;
 
     const series = {
       type: "wordCloud",
-      shape: useMask ? "circle" : echartsShape,
+      shape: "circle",
       left: "center",
       top: "center",
-      width: isFullRect ? "98%" : "92%",
-      height: isFullRect ? "98%" : "92%",
-      sizeRange: forExport ? [18, 88] : [14, 68],
+      width: isFullRect ? "98%" : "94%",
+      height: isFullRect ? "98%" : "94%",
+      sizeRange: forExport ? [16, 80] : [12, 62],
       rotationRange: [-45, 45],
       rotationStep: 15,
-      gridSize: forExport ? 8 : 10,
+      gridSize,
       drawOutOfBound: false,
       layoutAnimation: !forExport,
       textStyle: {
@@ -114,11 +152,12 @@ const WordCloudChart = (() => {
         return;
       }
       let settled = false;
+      const settleDelay = timeoutMs > 4000 ? 350 : 200;
       const done = () => {
         if (settled) return;
         settled = true;
         chartInst.off("finished", done);
-        setTimeout(() => resolve(true), 200);
+        setTimeout(() => resolve(true), settleDelay);
       };
       chartInst.on("finished", done);
       setTimeout(done, timeoutMs);
@@ -142,7 +181,7 @@ const WordCloudChart = (() => {
 
     if (exportMode) {
       chart.resize();
-      await waitUntilReady(chart, 5000);
+      await waitUntilReady(chart, 6000);
     }
   }
 
@@ -165,7 +204,6 @@ const WordCloudChart = (() => {
     return null;
   }
 
-  /** 使用独立离屏 Chart 导出，避免与页面渲染叠加 */
   async function exportPNG({ list, shape, customMaskUrl, width, height, drawBackground }) {
     if (!list?.length) return null;
 
@@ -182,13 +220,14 @@ const WordCloudChart = (() => {
     const exportChart = echarts.init(host, null, { renderer: "canvas" });
     const savedMask = currentMaskImage;
     const savedShape = currentShape;
+    const savedRatio = maskFillRatio;
 
     try {
       await resolveMask(shape, customMaskUrl);
       exportChart.resize({ width: w, height: h });
       exportChart.clear();
       exportChart.setOption(buildOption(list, shape, true), { notMerge: true });
-      await waitUntilReady(exportChart, 6000);
+      await waitUntilReady(exportChart, 8000);
 
       const chartCanvas = captureFromChart(exportChart, pr);
       if (!chartCanvas?.width) return null;
@@ -206,6 +245,7 @@ const WordCloudChart = (() => {
       host.remove();
       currentMaskImage = savedMask;
       currentShape = savedShape;
+      maskFillRatio = savedRatio;
       if (chart && containerEl) {
         chart.resize();
         await render(list, shape, customMaskUrl, false);
